@@ -29,5 +29,7 @@ setup(
                       "scikitlearn",
                       "matplotlib",
                       "scipy",
-                      "sklearn"],
+                      "sklearn",
+                      "astropy",
+                      "astroquery"],
 )

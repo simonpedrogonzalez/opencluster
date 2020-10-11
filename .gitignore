@@ -130,3 +130,7 @@ dmypy.json
 .pyre/
 
 .idea/
+
+*.ipynb
+*.vot
+*.csv
