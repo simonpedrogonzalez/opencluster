@@ -22,8 +22,6 @@ class TestDataRetriever:
     def test_cone_search(self):
         table = cone_search(name="ic2395", radius=0.1)
         assert isinstance(table, Table)
-
-    def test_coors_cone_search(self):
         table = cone_search(ra=130.62916667, dec=-48.1, radius=0.1)
         assert isinstance(table, Table)
 
@@ -38,6 +36,14 @@ class TestDataRetriever:
             assert True
         try:
             cone_search(dec=130.62916667, radius=0.1)
+        except ValueError:
+            assert True
+        try:
+            cone_search(name=3, radius=0.1)
+        except ValueError:
+            assert True
+        try:
+            cone_search(name="ic2395", radius="0.1")
         except ValueError:
             assert True
 

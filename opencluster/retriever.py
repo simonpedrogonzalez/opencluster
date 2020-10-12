@@ -44,9 +44,9 @@ def cone_search(
     dump_to_file=False,
     **kwargs
 ):
-    if not isinstance(radius, (float, int, u.Quantity)):
-        raise ValueError("radious must be specified")
-    elif not isinstance(radius, u.Quantity):
+    if not isinstance(radius, (float, int)):
+        raise ValueError("radious must be specified with int or float")
+    else:
         radius = u.Quantity(radius, u.degree)
     if not ((name is not None) ^ (ra is not None and dec is not None)):
         raise ValueError("'name' or 'ra' and 'dec' are required (not both)")
