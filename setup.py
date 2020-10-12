@@ -26,10 +26,9 @@ setup(
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     ],
     install_requires=["numpy",
-                      "scikitlearn",
                       "matplotlib",
                       "scipy",
-                      "sklearn",
+                      "Cython",
                       "astropy",
                       "astroquery"],
 )
