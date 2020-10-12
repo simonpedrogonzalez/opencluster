@@ -44,7 +44,6 @@ def cone_search(
     dump_to_file=False,
     **kwargs
 ):
-
     if not isinstance(radius, (float, int, u.Quantity)):
         raise ValueError("radious must be specified")
     elif not isinstance(radius, u.Quantity):
@@ -64,7 +63,11 @@ def cone_search(
             coord = SkyCoord(ra, dec, unit=(u.degree, u.degree), frame="icrs")
 
     job = Gaia.cone_search_async(
-        coordinate=coord, radius=radius, columns=columns, **kwargs
+        coordinate=coord,
+        radius=radius,
+        columns=columns,
+        dump_to_file=dump_to_file,
+        **kwargs
     )
 
     if not dump_to_file:
