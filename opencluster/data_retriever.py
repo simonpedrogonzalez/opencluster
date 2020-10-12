@@ -5,6 +5,7 @@ from astropy.coordinates import SkyCoord
 from astroquery.gaia import Gaia
 from opencluster.decorators import unsilence_warnings
 from astropy.io.votable import parse
+import warnings
 
 
 @unsilence_warnings()
@@ -42,6 +43,7 @@ def cone_search(
         "pmdec_error",
     ],
     dump_to_file=False,
+    row_limit=50,
     **kwargs
 ):
     if not isinstance(radius, (float, int)):
@@ -61,6 +63,12 @@ def cone_search(
             raise ValueError("ra and dec must be numeric")
         else:
             coord = SkyCoord(ra, dec, unit=(u.degree, u.degree), frame="icrs")
+    if not isinstance(row_limit, int):
+        raise ValueError("row_limit must be int")
+    elif row_limit == -1:
+        warnings.warn("Row limit set to unlimited.")
+
+    Gaia.ROW_LIMIT = row_limit
 
     job = Gaia.cone_search_async(
         coordinate=coord,
