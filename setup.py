@@ -13,9 +13,7 @@ setup(
     version="0.0.1",
     author="Simón Pedro González, Antonio Alejo",
     author_email="simon.pedro.g@gmail.com",
-    description=(
-        "mempership probabilities for open star clusters"
-    ),
+    description=("mempership probabilities for open star clusters"),
     license="GNU3",
     keywords="star cluster membership probabilities",
     url="http://packages.python.org/opencluster",
@@ -26,11 +24,13 @@ setup(
         "Topic :: Scientific/Engineering :: Astronomy",
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     ],
-    install_requires=["numpy",
-                      "matplotlib",
-                      "scipy",
-                      "Cython",
-                      "scikit-learn",
-                      "astropy",
-                      "astroquery"],
+    install_requires=[
+        "numpy",
+        "matplotlib",
+        "scipy",
+        "Cython",
+        "scikit-learn",
+        "astropy",
+        "astroquery",
+    ],
 )

@@ -1,9 +1,15 @@
-from opencluster.data_retriever import simbad_search, cone_search, load_VOTable
+import os
+
 from astropy.coordinates import SkyCoord
-from opencluster.exceptions import CatalogNotFoundException
 from astropy.table.table import Table
 from astropy.utils.diff import report_diff_values
-import os
+
+from opencluster.opencluster import (
+    CatalogNotFoundException,
+    cone_search,
+    load_VOTable,
+    simbad_search,
+)
 
 
 class TestDataRetriever:
@@ -26,12 +32,7 @@ class TestDataRetriever:
         table2 = cone_search(name="ic2395", radius=0.01, row_limit=-1)
         assert isinstance(table2, Table)
         assert len(table2) == 52
-        table3 = cone_search(
-            ra=130.62916667,
-            dec=-48.1,
-            radius=0.1,
-            row_limit=80
-        )
+        table3 = cone_search(ra=130.62916667, dec=-48.1, radius=0.1, row_limit=80)
         assert isinstance(table3, Table)
         assert len(table3) == 80
 
@@ -53,7 +54,7 @@ class TestDataRetriever:
         except ValueError:
             assert True
         try:
-            cone_search(name="ic2395", radius=0.1, row_limit=.1)
+            cone_search(name="ic2395", radius=0.1, row_limit=0.1)
         except ValueError:
             assert True
 
@@ -66,7 +67,7 @@ class TestDataRetriever:
             radius=0.1,
             output_file=file,
             dump_to_file=True,
-            row_limit=80
+            row_limit=80,
         )
         loaded_table = load_VOTable(file)
         identical = report_diff_values(original_table, loaded_table)

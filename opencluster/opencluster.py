@@ -1,25 +1,42 @@
-import numpy as np
+import warnings
+
 import astropy.units as u
-from astroquery.simbad import Simbad
 from astropy.coordinates import SkyCoord
-from astroquery.gaia import Gaia
-from opencluster.decorators import unsilence_warnings
 from astropy.io.votable import parse
+
+from astroquery.gaia import Gaia
+from astroquery.simbad import Simbad
+
+import numpy as np
+
+
+class CatalogNotFoundException(Exception):
+    def __init__(self, message="No known catalog could be found"):
+        self.message = message
+        super().__init__(self.message)
+
+
+def unsilence_warnings():
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            warnings.filterwarnings("error")
+            try:
+                return func(*args, **kwargs)
+            except Exception as exception:
+                if "No known catalog could be found" in str(exception):
+                    raise CatalogNotFoundException from None
+                warnings.warn(str(exception))
+
+        return wrapper
+
+    return decorator
 
 
 @unsilence_warnings()
 def simbad_search(id):
     result = Simbad.query_object(id)
-    ra = (
-        np.array(result["RA"])[0]
-        .replace(" ", "h", 1)
-        .replace(" ", "m", 1) + "s"
-    )
-    dec = (
-        np.array(result["DEC"])[0]
-        .replace(" ", "d", 1)
-        .replace(" ", "m", 1) + "s"
-    )
+    ra = np.array(result["RA"])[0].replace(" ", "h", 1).replace(" ", "m", 1) + "s"
+    dec = np.array(result["DEC"])[0].replace(" ", "d", 1).replace(" ", "m", 1) + "s"
     return SkyCoord(ra, dec, frame="icrs")
 
 
@@ -57,8 +74,7 @@ def cone_search(
         else:
             coord = simbad_search(name)
     if (ra, dec) != (None, None):
-        if not isinstance(ra, (float, int)) or\
-             not isinstance(dec, (float, int)):
+        if not isinstance(ra, (float, int)) or not isinstance(dec, (float, int)):
             raise ValueError("ra and dec must be numeric")
         else:
             coord = SkyCoord(ra, dec, unit=(u.degree, u.degree), frame="icrs")
@@ -84,8 +100,6 @@ def cone_search(
 
 def load_VOTable(path):
     table = (
-        parse(path, pedantic=False).
-        get_first_table().
-        to_table(use_names_over_ids=True)
+        parse(path, pedantic=False).get_first_table().to_table(use_names_over_ids=True)
     )
     return table
