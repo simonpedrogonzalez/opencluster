@@ -1,4 +1,5 @@
 import os
+
 from setuptools import setup
 
 
@@ -29,6 +30,7 @@ setup(
                       "matplotlib",
                       "scipy",
                       "Cython",
+                      "scikit-learn",
                       "astropy",
                       "astroquery"],
 )

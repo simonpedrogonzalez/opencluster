@@ -23,14 +23,17 @@ class TestDataRetriever:
         table = cone_search(name="ic2395", radius=0.1)
         assert isinstance(table, Table)
         assert len(table) == 50
-        table = cone_search(
+        table2 = cone_search(name="ic2395", radius=0.01, row_limit=-1)
+        assert isinstance(table2, Table)
+        assert len(table2) == 52
+        table3 = cone_search(
             ra=130.62916667,
             dec=-48.1,
             radius=0.1,
             row_limit=80
         )
-        assert isinstance(table, Table)
-        assert len(table) == 80
+        assert isinstance(table3, Table)
+        assert len(table3) == 80
 
     def test_wrong_params_conse_search(self):
         try:
@@ -50,7 +53,7 @@ class TestDataRetriever:
         except ValueError:
             assert True
         try:
-            cone_search(name="ic2395", radius="0.1")
+            cone_search(name="ic2395", radius=0.1, row_limit=.1)
         except ValueError:
             assert True
 

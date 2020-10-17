@@ -12,7 +12,6 @@ def unsilence_warnings():
                 if "No known catalog could be found" in str(exception):
                     raise CatalogNotFoundException from None
                 warnings.warn(str(exception))
-
         return wrapper
 
     return decorator
