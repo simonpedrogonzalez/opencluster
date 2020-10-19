@@ -1,7 +1,7 @@
 # Opencluster
 
-query_region: easy to use wrapper for simple radial search queries, over some of the most commonly used catalogs for coordinates, proper motions, parallax and magnitudes (gaia DR1 & DR2, hipparcos, tychos2, etc from the astroquery Gaia web service)
-
+query_region: easy to use wrapper for simple radial search queries, over some of the most commonly used catalogs for coordinates, proper motions, parallax and magnitudes (gaia DR1 & DR2, hipparcos, tychos2, etc from the astroquery Gaia web service). Examples:
+```
 from opencluster import region
 import astropy.units as u
 
@@ -16,3 +16,4 @@ region(name="ic2395", radius=u.Quantity("30", u.arcminute))
 .from_table("public.hipparcos", ra_name="ra", dec_name="de")
 .top(50)
 .get(dump_to_file=True, output_file="test.vot")
+´´´
