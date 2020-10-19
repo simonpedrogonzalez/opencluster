@@ -1,5 +1,6 @@
 import os
 
+import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astropy.table.table import Table
 from astropy.utils.diff import report_diff_values
@@ -8,6 +9,7 @@ from opencluster.opencluster import (
     CatalogNotFoundException,
     cone_search,
     load_VOTable,
+    region,
     simbad_search,
 )
 
@@ -75,3 +77,43 @@ class TestDataRetriever:
         assert identical
         if os.path.exists(file):
             os.remove(file)
+
+    def test_queries(self):
+        table1 = (
+            region(ra=130.62916667, dec=-48.1, radius=u.Quantity("30", u.arcminute))
+            .from_table("gaiadr2.gaia_source")
+            .select(["ra", "dec", "pmra", "pmdec", "phot_g_mean_mag"])
+            .where({"phot_g_mean_mag": "<15"})
+            .top(55)
+            .get(verbose=True)
+        )
+        assert isinstance(table1, Table)
+        assert len(table1) == 55
+
+        region(name="ic2395", radius=u.Quantity("30", u.arcminute)).from_table(
+            "public.hipparcos", ra_name="ra", dec_name="de"
+        ).select("*").top(50).get(
+            verbose=True, dump_to_file=True, output_file="test.vot"
+        )
+
+        table2 = load_VOTable("test.vot")
+        assert isinstance(table2, Table)
+        assert len(table2) == 7
+        if os.path.exists("test.vot"):
+            os.remove("test.vot")
+
+        query = (
+            region(ra=130.62916667, dec=-48.1, radius=u.Quantity("30", u.arcminute))
+            .from_table("gaiadr2.gaia_source")
+            .select(["ra", "dec", "pmra", "pmdec", "phot_g_mean_mag"])
+            .where({"phot_g_mean_mag": "<15"})
+            .top(55)
+        )
+        assert len(query.list_tables()) == 95
+        assert len(query.list_columns("public.hipparcos")) == 78
+        assert (
+            query.table_description("public.hipparcos")
+            == """table = TAP Table name: public.public.hipparcos
+Description: hipparcos original catalogue (J1991.25)
+Num. columns: 78"""
+        )

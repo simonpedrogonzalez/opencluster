@@ -6,6 +6,9 @@ from astropy.io.votable import parse
 
 from astroquery.gaia import Gaia
 from astroquery.simbad import Simbad
+from astroquery.utils.commons import coord_to_radec, radius_to_unit
+
+from attr import attrib, attrs
 
 import numpy as np
 
@@ -60,7 +63,7 @@ def cone_search(
     ],
     dump_to_file=False,
     row_limit=50,
-    **kwargs
+    **kwargs,
 ):
     if not isinstance(radius, (float, int)):
         raise ValueError("radious must be specified with int or float")
@@ -90,7 +93,7 @@ def cone_search(
         radius=radius,
         columns=columns,
         dump_to_file=dump_to_file,
-        **kwargs
+        **kwargs,
     )
 
     if not dump_to_file:
@@ -103,3 +106,179 @@ def load_VOTable(path):
         parse(path, pedantic=False).get_first_table().to_table(use_names_over_ids=True)
     )
     return table
+
+
+@attrs
+class Query:
+    table = attrib(default=Gaia.MAIN_GAIA_TABLE)
+    column_filters = attrib(default=dict())
+    row_limit = attrib(default=-1)
+    radius = attrib(default=None)
+    coords = attrib(default=None)
+    ra_name = attrib(default=Gaia.MAIN_GAIA_TABLE_RA)
+    dec_name = attrib(default=Gaia.MAIN_GAIA_TABLE_DEC)
+    columns = attrib(
+        default=[
+            "ra",
+            "ra_error",
+            "dec",
+            "dec_error",
+            "parallax",
+            "parallax_error",
+            "pmra",
+            "pmra_error",
+            "pmdec",
+            "pmdec_error",
+        ]
+    )
+    available_tables = attrib(default=None)
+
+    def where(self, condition):
+        if not isinstance(condition, dict):
+            raise ValueError("condition must be dict: {'column': '> value'}")
+        self.column_filters = {**self.column_filters, **condition}
+        return self
+
+    def select(self, columns):
+        if columns != "*" and (
+            not isinstance(columns, list)
+            or not all(isinstance(elem, str) for elem in columns)
+        ):
+            raise ValueError("columns must be list of strings")
+        self.columns = columns
+        return self
+
+    def list_tables(self, table=None):
+        if self.available_tables is None:
+            self.available_tables = Gaia.load_tables()
+        return [table.get_qualified_name() for table in self.available_tables]
+
+    def list_columns(self, table=None):
+        if table is None:
+            table = self.table
+        elif not isinstance(table, str):
+            raise ValueError("table must be string")
+        return [column.name for column in Gaia.load_table(table).columns]
+
+    def table_description(self, table=None):
+        if table is None:
+            table = self.table
+        elif not isinstance(table, str):
+            raise ValueError("table must be string")
+        return f"table = {Gaia.load_table(table)}"
+
+    def from_table(self, table, ra_name=None, dec_name=None):
+        if not isinstance(table, str):
+            raise ValueError("table must be string")
+        if (ra_name, dec_name) != (None, None):
+            if not isinstance(ra_name, str) or not isinstance(dec_name, str):
+                raise ValueError("ra and dec parameter names in table must be string")
+            else:
+                self.ra_name = ra_name
+                self.dec_name = dec_name
+        self.table = table
+        return self
+
+    def build(self):
+        """parse things and do de query"""
+
+        if self.columns != "*":
+            columns = ",".join(map(str, self.columns))
+        else:
+            columns = "*"
+
+        if self.radius is not None and self.coords is not None:
+            raHours, dec = coord_to_radec(self.coords)
+            ra = raHours * 15.0
+
+        query = """
+                SELECT
+                  {row_limit}
+                  {columns},
+                  DISTANCE(
+                    POINT('ICRS', {ra_column}, {dec_column}),
+                    POINT('ICRS', {ra}, {dec})
+                  ) AS dist
+                FROM
+                  {table_name}
+                WHERE
+                  1 = CONTAINS(
+                    POINT('ICRS', {ra_column}, {dec_column}),
+                    CIRCLE('ICRS', {ra}, {dec}, {radius}))
+                """.format(
+            **{
+                "ra_column": self.ra_name,
+                "row_limit": "TOP {0}".format(self.row_limit)
+                if self.row_limit > 0
+                else "",
+                "dec_column": self.dec_name,
+                "columns": columns,
+                "ra": ra,
+                "dec": dec,
+                "radius": self.radius,
+                "table_name": self.table,
+            }
+        )
+
+        if self.column_filters:
+            query_filters = "".join(
+                [
+                    """AND {column} {condition}
+                """.format(
+                        **{"column": column, "condition": condition}
+                    )
+                    for column, condition in self.column_filters.items()
+                ]
+            )
+            query += query_filters
+
+        query += """ORDER BY
+                dist ASC
+                 """
+        return query
+
+    def top(self, row_limit):
+        """set row limit"""
+        if not isinstance(row_limit, int):
+            raise ValueError("row_limit must be int")
+        self.row_limit = row_limit
+        return self
+
+    def get(
+        self,
+        dump_to_file=False,
+        output_file=None,
+        output_format="votable",
+        verbose=False,
+    ):
+        query = self.build()
+        job = Gaia.launch_job_async(
+            query=query,
+            output_file=output_file,
+            output_format=output_format,
+            verbose=verbose,
+            dump_to_file=dump_to_file,
+        )
+        if not dump_to_file:
+            table = job.get_results()
+            return table
+
+
+def region(*, ra=None, dec=None, name=None, radius):
+    if not isinstance(radius, u.quantity.Quantity):
+        raise ValueError("radious must be astropy.units.quantity.Quantity")
+    if not ((name is not None) ^ (ra is not None and dec is not None)):
+        raise ValueError("'name' or 'ra' and 'dec' are required (not both)")
+    if name is not None:
+        if not isinstance(name, str):
+            raise ValueError("name must be string")
+        else:
+            coord = simbad_search(name)
+    if (ra, dec) != (None, None):
+        if not isinstance(ra, (float, int)) or not isinstance(dec, (float, int)):
+            raise ValueError("ra and dec must be numeric")
+        else:
+            coord = SkyCoord(ra, dec, unit=(u.degree, u.degree), frame="icrs")
+    radiusDeg = radius_to_unit(radius, unit="deg")
+    query = Query(radius=radiusDeg, coords=coord)
+    return query
