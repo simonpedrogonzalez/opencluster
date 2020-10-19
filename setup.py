@@ -14,7 +14,7 @@ setup(
     author="Simón Pedro González, Antonio Alejo",
     author_email="simon.pedro.g@gmail.com",
     description=("mempership probabilities for open star clusters"),
-    license="GNU3",
+    license="GPL-3",
     keywords="star cluster membership probabilities",
     url="http://packages.python.org/opencluster",
     packages=["opencluster", "tests"],
