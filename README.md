@@ -1,6 +1,6 @@
 # Opencluster
 
-https://travis-ci.com/simonpedrogonzalez/opencluster.svg?branch=master
+[![Build Status](https://travis-ci.com/simonpedrogonzalez/opencluster.svg?branch=master)](https://travis-ci.com/simonpedrogonzalez/opencluster)
 
 query_region: easy to use wrapper for simple radial search queries, over some of the most commonly used catalogs for coordinates, proper motions, parallax and magnitudes (gaia DR1 & DR2, hipparcos, tychos2, etc from the astroquery Gaia web service). Examples:
 ```
