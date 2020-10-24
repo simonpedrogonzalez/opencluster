@@ -30,6 +30,8 @@ from opencluster.opencluster import (
     simbad_search,
 )
 
+import pytest
+
 
 class TestDataRetriever:
     def test_correct_simbad_search(self):
@@ -39,10 +41,8 @@ class TestDataRetriever:
         ).to_string("hmsdms")
 
     def test_non_existent_catalog_simbad_search(self):
-        try:
-            assert simbad_search("non existent table")
-        except Exception as e:
-            assert isinstance(e, CatalogNotFoundException)
+        with pytest.raises(CatalogNotFoundException):
+            simbad_search("non existent table")
 
     def test_cone_search(self):
         table = cone_search(name="ic2395", radius=0.1)
@@ -51,31 +51,23 @@ class TestDataRetriever:
         table2 = cone_search(name="ic2395", radius=0.01, row_limit=-1)
         assert isinstance(table2, Table)
         assert len(table2) == 52
-        table3 = cone_search(ra=130.62916667, dec=-48.1, radius=0.1, row_limit=80)
+        table3 = cone_search(
+            ra=130.62916667, dec=-48.1, radius=0.1, row_limit=80
+        )
         assert isinstance(table3, Table)
         assert len(table3) == 80
 
     def test_wrong_params_conse_search(self):
-        try:
+        with pytest.raises(ValueError):
             cone_search(ra=130.62916667, radius=0.1)
-        except ValueError:
-            assert True
-        try:
+        with pytest.raises(ValueError):
             cone_search(name="ic2395", ra=130.62916667, radius=0.1)
-        except ValueError:
-            assert True
-        try:
+        with pytest.raises(ValueError):
             cone_search(dec=130.62916667, radius=0.1)
-        except ValueError:
-            assert True
-        try:
+        with pytest.raises(ValueError):
             cone_search(name=3, radius=0.1)
-        except ValueError:
-            assert True
-        try:
+        with pytest.raises(ValueError):
             cone_search(name="ic2395", radius=0.1, row_limit=0.1)
-        except ValueError:
-            assert True
 
     def test_loadVOTable(self):
         name = "ic2395"
@@ -97,7 +89,11 @@ class TestDataRetriever:
 
     def test_queries(self):
         table1 = (
-            region(ra=130.62916667, dec=-48.1, radius=u.Quantity("30", u.arcminute))
+            region(
+                ra=130.62916667,
+                dec=-48.1,
+                radius=u.Quantity("30", u.arcminute),
+            )
             .from_table("gaiadr2.gaia_source")
             .select(["ra", "dec", "pmra", "pmdec", "phot_g_mean_mag"])
             .where({"phot_g_mean_mag": "<15"})
@@ -120,7 +116,11 @@ class TestDataRetriever:
             os.remove("test.vot")
 
         query = (
-            region(ra=130.62916667, dec=-48.1, radius=u.Quantity("30", u.arcminute))
+            region(
+                ra=130.62916667,
+                dec=-48.1,
+                radius=u.Quantity("30", u.arcminute),
+            )
             .from_table("gaiadr2.gaia_source")
             .select(["ra", "dec", "pmra", "pmdec", "phot_g_mean_mag"])
             .where({"phot_g_mean_mag": "<15"})
