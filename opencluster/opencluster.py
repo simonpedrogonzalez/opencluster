@@ -28,6 +28,13 @@ from astroquery.utils.commons import coord_to_radec, radius_to_unit
 from attr import attrib, attrs
 
 import numpy as np
+import numpy.linalg as lin
+
+import matplotlib.pyplot as pyplot
+
+import scipy.stats as sts
+import scipy.special as spc
+import scipy.optimize as opt
 
 
 class CatalogNotFoundException(Exception):
@@ -313,3 +320,88 @@ def region(*, ra=None, dec=None, name=None, radius):
     radiusDeg = radius_to_unit(radius, unit="deg")
     query = Query(radius=radiusDeg, coords=coord)
     return query
+
+
+def qmethod(v, bv, ub, plx):
+    """ Q method (Johnson & Morgan, 1953 )"""
+    Q = []
+    Ebv = []
+    Eub = []
+    Rv = []
+    Modv = []
+    for ii in range(np.size(tablafot[:, 0])):
+        q = ub - 0.72 * bv
+        ebv = bv - 0.337 * q + 0.009
+        eub = 0.72 * ebv
+        rv = 3.0 * ebv
+        modv = 5.0 * np.log10(1.0 / (plx * 0.001)) - 5.0 + rv
+    Q.append(q)
+    Ebv.append(ebv)
+    Eub.append(eub)
+    Rv.append(rv)
+    Modv.append(modv)
+    Q = np.array(Q)
+    Q = Q.T
+    Ebv = np.array(Ebv)
+    Ebv = Ebv.T
+    Eub = np.array(Eub)
+    Eub = Eub.T
+    Rv = np.array(Rv)
+    Rv = Rv.T
+    Modv = np.array(Modv)
+    Modv = Modv.T
+    fot = np.column_stack((Q, Ebv, Eub, Rv, Modv))
+    return fot
+
+
+class LMfitplx:
+    fac = rango / bines
+    his, xx = np.histogram(
+        tabla[:, 2], range=(plxi, plxf), bins=bines, density=True
+    )
+    his = his / np.sum(his)
+    xx = xx - fac / 2
+
+    def lmfitplx(par, x, y):
+        """Ajuste de la distribución de paralaje utilizando una función logarítmica y una exponencial negativa para el campo y una gaussiana para el cúmulo"""
+        zz = (
+            (par[0] * np.log(x / par[1]))
+            + (par[2] * np.exp(-x / par[3]))
+            + (par[4] / np.sqrt(2 * np.pi * par[6]))
+            * np.exp(-((x - par[5]) ** 2) / (2 * (par[6] ** 2)))
+        ) - yy
+        return zz
+
+    solution = opt.least_squares(
+        lmfitplx,
+        np.array([4.0, 0.1, 0.1, 1.0, k, mu, sigma]),
+        method="lm",
+        ftol=1.0e-12,
+        gtol=1.0e-12,
+        xtol=1.0e-12,
+        args=(xx[1:], his),
+    )
+    solution = solution["x"]
+    xxx = np.linspace(plxi + 0.1, plxf, 10000)
+    px = (
+        (solution[0] * np.log(xxx / solution[1]))
+        + (solu[2] * np.exp(-xxx / solution[3]))
+        + (solu[4] / np.sqrt(2 * np.pi * solution[6]))
+        * np.exp(-((xxx - solution[5]) ** 2) / (2 * (solution[6] ** 2)))
+    )
+    fitplx = np.array([xxx, px])
+
+
+def lmfit(par, x, y):
+    """Ajuste de una distribución utilizando dos gaussianas"""
+    zz = (
+        (
+            (par[4] / (np.sqrt(2.0 * np.pi * par[1])))
+            * (np.exp(-((xx - par[0]) ** 2 / (2 * (par[1]) ** 2))))
+        )
+        + (
+            (par[5] / (np.sqrt(2.0 * np.pi * par[3])))
+            * (np.exp(-((xx - par[2]) ** 2 / (2 * (par[3]) ** 2))))
+        )
+    ) - yy
+    return zz
