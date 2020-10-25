@@ -362,7 +362,6 @@ class LMfitplx:
     table_name = attrib(default=None)
 
     def fitplx(table_name, plxi, plxf, bines):
-        c
         ran = plxf - plxi
         fac = ran / bines
         his, xx = np.histogram(
