@@ -55,8 +55,14 @@ def unsilence_warnings():
 @unsilence_warnings()
 def simbad_search(id):
     result = Simbad.query_object(id)
-    ra = np.array(result["RA"])[0].replace(" ", "h", 1).replace(" ", "m", 1) + "s"
-    dec = np.array(result["DEC"])[0].replace(" ", "d", 1).replace(" ", "m", 1) + "s"
+    ra = (
+        np.array(result["RA"])[0].replace(" ", "h", 1).replace(" ", "m", 1)
+        + "s"
+    )
+    dec = (
+        np.array(result["DEC"])[0].replace(" ", "d", 1).replace(" ", "m", 1)
+        + "s"
+    )
     return SkyCoord(ra, dec, frame="icrs")
 
 
@@ -94,7 +100,9 @@ def cone_search(
         else:
             coord = simbad_search(name)
     if (ra, dec) != (None, None):
-        if not isinstance(ra, (float, int)) or not isinstance(dec, (float, int)):
+        if not isinstance(ra, (float, int)) or not isinstance(
+            dec, (float, int)
+        ):
             raise ValueError("ra and dec must be numeric")
         else:
             coord = SkyCoord(ra, dec, unit=(u.degree, u.degree), frame="icrs")
@@ -120,7 +128,9 @@ def cone_search(
 
 def load_VOTable(path):
     table = (
-        parse(path, pedantic=False).get_first_table().to_table(use_names_over_ids=True)
+        parse(path, pedantic=False)
+        .get_first_table()
+        .to_table(use_names_over_ids=True)
     )
     return table
 
@@ -189,7 +199,9 @@ class Query:
             raise ValueError("table must be string")
         if (ra_name, dec_name) != (None, None):
             if not isinstance(ra_name, str) or not isinstance(dec_name, str):
-                raise ValueError("ra and dec parameter names in table must be string")
+                raise ValueError(
+                    "ra and dec parameter names in table must be string"
+                )
             else:
                 self.ra_name = ra_name
                 self.dec_name = dec_name
@@ -292,7 +304,9 @@ def region(*, ra=None, dec=None, name=None, radius):
         else:
             coord = simbad_search(name)
     if (ra, dec) != (None, None):
-        if not isinstance(ra, (float, int)) or not isinstance(dec, (float, int)):
+        if not isinstance(ra, (float, int)) or not isinstance(
+            dec, (float, int)
+        ):
             raise ValueError("ra and dec must be numeric")
         else:
             coord = SkyCoord(ra, dec, unit=(u.degree, u.degree), frame="icrs")
