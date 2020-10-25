@@ -329,7 +329,7 @@ def qmethod(v, bv, ub, plx):
     Eub = []
     Rv = []
     Modv = []
-    for ii in range(np.size(tablafot[:, 0])):
+    for ii in range(np.size(fottable[:, 0])):
         q = ub - 0.72 * bv
         ebv = bv - 0.337 * q + 0.009
         eub = 0.72 * ebv
@@ -354,46 +354,57 @@ def qmethod(v, bv, ub, plx):
     return fot
 
 
+@attrs
 class LMfitplx:
-    fac = rango / bines
-    his, xx = np.histogram(
-        tabla[:, 2], range=(plxi, plxf), bins=bines, density=True
-    )
-    his = his / np.sum(his)
-    xx = xx - fac / 2
+    plxi = attrib(default=None)
+    plxf = attrib(default=None)
+    bines = attrib(default=None, type=int)
+    table_name = attrib(default=None)
 
-    def lmfitplx(par, x, y):
-        """Ajuste de la distribución de paralaje utilizando una función logarítmica y una exponencial negativa para el campo y una gaussiana para el cúmulo"""
-        zz = (
-            (par[0] * np.log(x / par[1]))
-            + (par[2] * np.exp(-x / par[3]))
-            + (par[4] / np.sqrt(2 * np.pi * par[6]))
-            * np.exp(-((x - par[5]) ** 2) / (2 * (par[6] ** 2)))
-        ) - yy
-        return zz
+    def fitplx(table_name, plxi, plxf, bines):
+        c
+        ran = plxf - plxi
+        fac = ran / bines
+        his, xx = np.histogram(
+            table_name[:, 2], range=(plxi, plxf), bins=bines, density=True
+        )
+        his = his / np.sum(his)
+        xx = xx - fac / 2
 
-    solution = opt.least_squares(
-        lmfitplx,
-        np.array([4.0, 0.1, 0.1, 1.0, k, mu, sigma]),
-        method="lm",
-        ftol=1.0e-12,
-        gtol=1.0e-12,
-        xtol=1.0e-12,
-        args=(xx[1:], his),
-    )
-    solution = solution["x"]
-    xxx = np.linspace(plxi + 0.1, plxf, 10000)
-    px = (
-        (solution[0] * np.log(xxx / solution[1]))
-        + (solu[2] * np.exp(-xxx / solution[3]))
-        + (solu[4] / np.sqrt(2 * np.pi * solution[6]))
-        * np.exp(-((xxx - solution[5]) ** 2) / (2 * (solution[6] ** 2)))
-    )
-    fitplx = np.array([xxx, px])
+        def lmfitplx(par, x, y):
+            """Fitting the parallax distribution using a logarithmic and negative exponential function
+            for the field and a Gaussian for the cluster"""
+            zz = (
+                (par[0] * np.log(x / par[1]))
+                + (par[2] * np.exp(-x / par[3]))
+                + (par[4] / np.sqrt(2 * np.pi * par[6]))
+                * np.exp(-((x - par[5]) ** 2) / (2 * (par[6] ** 2)))
+            ) - yy
+            return zz
+
+        solution = opt.least_squares(
+            lmfitplx,
+            np.array([4.0, 0.1, 0.1, 1.0, k, mu, sigma]),
+            method="lm",
+            ftol=1.0e-12,
+            gtol=1.0e-12,
+            xtol=1.0e-12,
+            args=(xx[1:], his),
+        )
+        solution = solution["x"]
+        xxx = np.linspace(plxi + 0.1, plxf, 10000)
+        px = (
+            (solution[0] * np.log(xxx / solution[1]))
+            + (solution[2] * np.exp(-xxx / solution[3]))
+            + (solution[4] / np.sqrt(2 * np.pi * solution[6]))
+            * np.exp(-((xxx - solution[5]) ** 2) / (2 * (solution[6] ** 2)))
+        )
+        fitplx = np.array([xxx, px])
+        return fitplx
 
 
 def lmfit(par, x, y):
-    """Ajuste de una distribución utilizando dos gaussianas"""
+    """Fitting a distribution using two Gaussians"""
     zz = (
         (
             (par[4] / (np.sqrt(2.0 * np.pi * par[1])))
