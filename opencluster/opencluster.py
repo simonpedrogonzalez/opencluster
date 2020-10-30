@@ -13,7 +13,7 @@
 
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
- 
+
 
 import warnings
 
@@ -144,6 +144,23 @@ def load_VOTable(path):
 
 @attrs
 class Query:
+
+    QUERY_TEMPLATE = """
+    SELECT
+    {row_limit}
+    {columns},
+    DISTANCE(
+        POINT('ICRS', {ra_column}, {dec_column}),
+        POINT('ICRS', {ra}, {dec})
+    ) AS dist
+    FROM
+    {table_name}
+    WHERE
+    1 = CONTAINS(
+        POINT('ICRS', {ra_column}, {dec_column}),
+        CIRCLE('ICRS', {ra}, {dec}, {radius}))
+    """
+
     table = attrib(default=Gaia.MAIN_GAIA_TABLE)
     column_filters = attrib(default=dict())
     row_limit = attrib(default=-1)
@@ -227,33 +244,17 @@ class Query:
             raHours, dec = coord_to_radec(self.coords)
             ra = raHours * 15.0
 
-        query = """
-                SELECT
-                  {row_limit}
-                  {columns},
-                  DISTANCE(
-                    POINT('ICRS', {ra_column}, {dec_column}),
-                    POINT('ICRS', {ra}, {dec})
-                  ) AS dist
-                FROM
-                  {table_name}
-                WHERE
-                  1 = CONTAINS(
-                    POINT('ICRS', {ra_column}, {dec_column}),
-                    CIRCLE('ICRS', {ra}, {dec}, {radius}))
-                """.format(
-            **{
-                "ra_column": self.ra_name,
-                "row_limit": "TOP {0}".format(self.row_limit)
-                if self.row_limit > 0
-                else "",
-                "dec_column": self.dec_name,
-                "columns": columns,
-                "ra": ra,
-                "dec": dec,
-                "radius": self.radius,
-                "table_name": self.table,
-            }
+        row_limit = f"TOP {self.row_limit}" if self.row_limit > 0 else ""
+
+        query = self.QUERY_TEMPLATE.format(
+            row_limit=row_limit,
+            columns=columns,
+            ra_column=self.ra_name,
+            dec_column=self.dec_name,
+            ra=ra,
+            dec=dec,
+            table_name=self.table,
+            radius=self.radius,
         )
 
         if self.column_filters:
@@ -261,7 +262,7 @@ class Query:
                 [
                     """AND {column} {condition}
                 """.format(
-                        **{"column": column, "condition": condition}
+                        column=column, condition=condition
                     )
                     for column, condition in self.column_filters.items()
                 ]
@@ -280,27 +281,15 @@ class Query:
         self.row_limit = row_limit
         return self
 
-    def get(
-        self,
-        dump_to_file=False,
-        output_file=None,
-        output_format="votable",
-        verbose=False,
-    ):
+    def get(self, **kwargs):
         query = self.build()
-        job = Gaia.launch_job_async(
-            query=query,
-            output_file=output_file,
-            output_format=output_format,
-            verbose=verbose,
-            dump_to_file=dump_to_file,
-        )
-        if not dump_to_file:
+        job = Gaia.launch_job_async(query=query, **kwargs)
+        if "dump_to_file" not in kwargs.get():
             table = job.get_results()
             return table
 
 
-def region(*, ra=None, dec=None, name=None, radius):
+def query_region(*, ra=None, dec=None, name=None, radius):
     if not isinstance(radius, u.quantity.Quantity):
         raise ValueError("radious must be astropy.units.quantity.Quantity")
     if not ((name is not None) ^ (ra is not None and dec is not None)):
@@ -320,98 +309,3 @@ def region(*, ra=None, dec=None, name=None, radius):
     radiusDeg = radius_to_unit(radius, unit="deg")
     query = Query(radius=radiusDeg, coords=coord)
     return query
-
-
-def qmethod(v, bv, ub, plx):
-    """ Q method (Johnson & Morgan, 1953 )"""
-    Q = []
-    Ebv = []
-    Eub = []
-    Rv = []
-    Modv = []
-    for ii in range(np.size(fottable[:, 0])):
-        q = ub - 0.72 * bv
-        ebv = bv - 0.337 * q + 0.009
-        eub = 0.72 * ebv
-        rv = 3.0 * ebv
-        modv = 5.0 * np.log10(1.0 / (plx * 0.001)) - 5.0 + rv
-    Q.append(q)
-    Ebv.append(ebv)
-    Eub.append(eub)
-    Rv.append(rv)
-    Modv.append(modv)
-    Q = np.array(Q)
-    Q = Q.T
-    Ebv = np.array(Ebv)
-    Ebv = Ebv.T
-    Eub = np.array(Eub)
-    Eub = Eub.T
-    Rv = np.array(Rv)
-    Rv = Rv.T
-    Modv = np.array(Modv)
-    Modv = Modv.T
-    fot = np.column_stack((Q, Ebv, Eub, Rv, Modv))
-    return fot
-
-
-@attrs
-class LMfitplx:
-    plxi = attrib(default=None)
-    plxf = attrib(default=None)
-    bines = attrib(default=None, type=int)
-    table_name = attrib(default=None)
-
-    def fitplx(table_name, plxi, plxf, bines):
-        ran = plxf - plxi
-        fac = ran / bines
-        his, xx = np.histogram(
-            table_name[:, 2], range=(plxi, plxf), bins=bines, density=True
-        )
-        his = his / np.sum(his)
-        xx = xx - fac / 2
-
-        def lmfitplx(par, x, y):
-            """Fitting the parallax distribution using a logarithmic and negative exponential function
-            for the field and a Gaussian for the cluster"""
-            zz = (
-                (par[0] * np.log(x / par[1]))
-                + (par[2] * np.exp(-x / par[3]))
-                + (par[4] / np.sqrt(2 * np.pi * par[6]))
-                * np.exp(-((x - par[5]) ** 2) / (2 * (par[6] ** 2)))
-            ) - yy
-            return zz
-
-        solution = opt.least_squares(
-            lmfitplx,
-            np.array([4.0, 0.1, 0.1, 1.0, k, mu, sigma]),
-            method="lm",
-            ftol=1.0e-12,
-            gtol=1.0e-12,
-            xtol=1.0e-12,
-            args=(xx[1:], his),
-        )
-        solution = solution["x"]
-        xxx = np.linspace(plxi + 0.1, plxf, 10000)
-        px = (
-            (solution[0] * np.log(xxx / solution[1]))
-            + (solution[2] * np.exp(-xxx / solution[3]))
-            + (solution[4] / np.sqrt(2 * np.pi * solution[6]))
-            * np.exp(-((xxx - solution[5]) ** 2) / (2 * (solution[6] ** 2)))
-        )
-        fitplx = np.array([xxx, px])
-        return fitplx
-
-
-def lmfit(par, x, y):
-    """Fitting a distribution using two Gaussians"""
-    zz = (
-        (
-            (par[4] / (np.sqrt(2.0 * np.pi * par[1])))
-            * (np.exp(-((xx - par[0]) ** 2 / (2 * (par[1]) ** 2))))
-        )
-        + (
-            (par[5] / (np.sqrt(2.0 * np.pi * par[3])))
-            * (np.exp(-((xx - par[2]) ** 2 / (2 * (par[3]) ** 2))))
-        )
-    ) - yy
-    return zz
