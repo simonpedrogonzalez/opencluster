@@ -2,21 +2,33 @@
 
 [![Build Status](https://travis-ci.com/simonpedrogonzalez/opencluster.svg?branch=master)](https://travis-ci.com/simonpedrogonzalez/opencluster)
 
-query_region: easy to use wrapper for simple radial search queries, over some of the most commonly used catalogs for coordinates, proper motions, parallax and magnitudes (gaia DR1 & DR2, hipparcos, tychos2, etc from the astroquery Gaia web service). Examples:
+load_remote: easy to use wrapper for simple radial search queries, over some of the most commonly used catalogs for coordinates, proper motions, parallax and magnitudes (gaia DR1 & DR2, hipparcos, tychos2, etc from the astroquery Gaia web service).
 ```python
 import astropy.units as u
 
-from opencluster import region
+from opencluster import load_remote
 
-votable = (
-    region(ra=130.62916667, dec=-48.1, radius=u.Quantity("30", u.arcminute))
-    .select(["ra", "dec", "pmra", "pmdec", "phot_g_mean_mag"])
-    .where({"phot_g_mean_mag": "<15"})
-    .top(55)
-    .get()
-)
+octable = load_remote(
+            table="gaiadr2.gaia_source",
+            name="ic2395",
+            radius=u.Quantity("30", u.arcminute),
+            limit=55,
+            columns=["ra", "dec", "pmra", "pmdec", "phot_g_mean_mag"],
+            filters={"phot_g_mean_mag": "<12"},
+        )
 
-region(name="ic2395", radius=u.Quantity("30", u.arcminute)).select("*").from_table(
-    "public.hipparcos", ra_name="ra", dec_name="de"
-).top(50).get(dump_to_file=True, output_file="test.vot")
+load_remote(
+            name="ic2395",
+            radius=u.Quantity("30", u.arcminute),
+            limit=55,
+            columns=["ra", "dec", "pmra", "pmdec", "phot_g_mean_mag"],
+            filters={"phot_g_mean_mag": "<12"},
+            dump_to_file=True,
+            output_file=name + ".vot",
+        )
 ```
+load_file: load an OCTable from VOTable file
+```python
+loaded_table = load_file(file)
+```
+Getting membership probabilities based on multiple variables (under development)
