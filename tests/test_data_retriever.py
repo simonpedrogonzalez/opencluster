@@ -48,6 +48,7 @@ class TestDataRetriever:
         name = "ic2395"
         file = name + ".vot"
         original_table = load_remote(
+            table="gaiadr2.gaia_source",
             name="ic2395",
             radius=u.Quantity("30", u.arcminute),
             limit=55,
