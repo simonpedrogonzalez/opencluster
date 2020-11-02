@@ -20,11 +20,10 @@ octable = load_remote(
 load_remote(
             name="ic2395",
             radius=u.Quantity("30", u.arcminute),
-            limit=55,
             columns=["ra", "dec", "pmra", "pmdec", "phot_g_mean_mag"],
             filters={"phot_g_mean_mag": "<12"},
             dump_to_file=True,
-            output_file=name + ".vot",
+            output_file="ic2395.vot",
         )
 ```
 load_file: load an OCTable from VOTable file
