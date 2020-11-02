@@ -32,5 +32,6 @@ setup(
         "scikit-learn",
         "astropy",
         "astroquery",
+        "pandas",
     ],
 )
