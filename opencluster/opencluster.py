@@ -16,7 +16,6 @@
 
 import inspect
 import io
-import warnings
 
 import astropy.units as u
 from astropy.coordinates import SkyCoord
@@ -31,16 +30,7 @@ from attr import attrib, attrs, validators
 
 import numpy as np
 
-import pandas as pd
-
 import scipy.optimize as opt
-from scipy.stats import norm
-
-
-class CatalogNotFoundException(Exception):
-    def __init__(self, message="No known catalog could be found"):
-        self.message = message
-        super().__init__(self.message)
 
 
 def checkargs(function):
@@ -63,23 +53,6 @@ def checkargs(function):
     return wrapper
 
 
-def unsilence_warnings():
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            warnings.filterwarnings("error")
-            try:
-                return func(*args, **kwargs)
-            except Exception as exception:
-                if "No known catalog could be found" in str(exception):
-                    raise CatalogNotFoundException from None
-                warnings.warn(str(exception))
-
-        return wrapper
-
-    return decorator
-
-
-@unsilence_warnings()
 def simbad_search(id):
     result = Simbad.query_object(id)
     ra = (
@@ -300,7 +273,9 @@ def lognegexp_normal(params, x):
     return (
         params[0] * np.log(x / params[1])
         + params[2] * np.exp(-x / params[3])
-        + params[4] * norm(params[5], params[6]).pdf(x)
+        + params[4]
+        / np.sqrt(2 * np.pi * params[6])
+        * np.exp(-((x - params[5]) ** 2) / (2 * (params[6] ** 2)))
     )
 
 
@@ -317,6 +292,11 @@ class OCTable:
     def __getattr__(self, a):
         return getattr(self.table, a)
 
+    def densities_plot(self, bins=100):
+        df = self.table.to_pandas()
+        plot = df.hist(bins=bins, grid=True, legend=True)
+        return plot
+
     @checkargs
     def fit_plx(
         self,
@@ -329,17 +309,50 @@ class OCTable:
         xtol: float = 1.0e-12,
         **kwargs,
     ):
-        plx = self.table[plx_col].data
-        plx = plx[plx.mask is False].data
 
+        # self.table tiene la tabla VOT
+        # toma la columna de paralaje de la tabla y le saca los datos con el .data
+        plx = self.table[plx_col].data
+        # en plx hay ahora un objeto con 2 arreglos, uno de datos (data) y uno de
+        # máscara (mask)
+        # hay un dato y una mascara por cada elemento. Si la mascara es True
+        # para un elemento, ese
+        # elemento en INVALIDO para hacer calculos. Los elementos que tienen
+        # mascara True son por
+        # ejemplo los nan y los infinitos.
+        # Tenemos que tomar solo los elementos VALIDOS:
+        #  filtramos los elementos validos,
+        #  y tomamos
+        # solo el arreglo de datos, que ahora solo tiene datos validos
+        plx = plx[plx.mask == False].data
+        # se obtiene un numpy array. (En este punto, plx
+        #  es un numpy array de datos
+        # validos con el que se puede seguir trabajando)
+        # ahi filtro por paralaje
+        plx = plx[plx > 0]
+
+        # ponerle nombre significativo a las variables,
+        #  por ejemplo his por histograma,
+        # bin_edges, por bordes de los bines
+        # aca notar que la variable bins puede ser un
+        # numero o bien un string que indica el
+        # metodo (ver en el encabezado de la funcion)
         his, bin_edges = np.histogram(plx, bins=bins, density=True, **kwargs)
         his = his / np.sum(his)
-        import ipdb
-
-        ipdb.set_trace()
-        bin_edges = bin_edges - (bin_edges[-1] - bin_edges[0]) / 2.0
+        # bin_edges = bin_edges - (bin_edges[-1] - bin_edges[0]) / 2
 
         solution = opt.least_squares(
+            # que signigica esta fun:
+            # la funcion se pone así porque NO quiero incluir
+            # el "- y" dentro de la funcion
+            # porque después quiero poder usar lognegexp_normal para
+            # sacar los "y" para graficar
+            # la funcion. SI le pongo el - y adentro, solo me sirve
+            # para calcular los residuos y
+            # no la puedo reutilizar.
+            # por eso pongo una lambda, que toma x, parametros e y,
+            # y calcula el resultado de la funcion
+            # para x con parametros=params, y luego le resta y
             fun=lambda params, x, y: lognegexp_normal(params, x) - y,
             x0=np.array(initial_params),
             method="lm",
@@ -349,9 +362,59 @@ class OCTable:
             xtol=xtol,
         )
 
+        # armo un eje con puntos "x" para graficar
         linspace = np.linspace(bin_edges[0] + 0.1, bin_edges[-1], 10000)
-        results = lognegexp_normal(solution.x, linspace)
+        # reutilizo la funcion para calcular los "y" del grafico
+        pdf = lognegexp_normal(solution.x, linspace)
+
+        # hago una figura con un sublplot
+        fig = plt.figure(figsize=(8, 8))
+        ax = fig.add_subplot(111)
+        # le agrego el histograma del paralaje con la misma
+        # cantidad de bines que usé en el ajuste
+        ax.hist(plx, len(bin_edges) - 1, normed=True)
+        # le agrego el grafico de la funcion de ajuste
+        ax.plot(linspace, pdf, lw=2)
+        fig.suptitle("Parallax fit")
+
+        # devuelvo un diccionario que tiene los parametros de la solucion
+        # y el grafico para ver el ajuste
         return {
             "params": solution.x,
-            "fit": pd.DataFrame({"plx": linspace, "pdf": results}),
+            "fit": fig,
         }
+
+    @checkargs
+    def fit_pm(
+        self,
+        pmra_col: str = "pmra",  # tiene que recibir los nombres
+        # de las columnas que tienen los datos
+        pmdec_col: str = "pmdec",  # por defecto tienen
+        # los nombres que vienen en las tablas de gaia
+    ):
+        # Esta funcion tiene que ajustar el movimiento propio
+        # tiene que recibir como parámetro todos lo que necesites
+        # EXCEPTO LOS DATOS de movimiento propio porque estos
+        # YA ESTAN dentro del mismo objeto
+        # OCTABLE. LOS DATOS se acceden así:
+
+        # self.table tiene la tabla VOT
+        # toma la columna de pmra de la tabla y le saca los datos con el .data
+        pmra = self.table[pmra_col].data
+        # en pmra hay ahora un objeto con 2 arreglos, uno de datos (data) y uno de máscara (mask)
+        # hay un dato y una mascara por cada elemento. Si la mascara es True para un elemento, ese
+        # elemento en INVALIDO para hacer calculos. Los elementos que tienen mascara True son por
+        # ejemplo los nan y los infinitos.
+        # Tenemos que tomar solo los elementos VALIDOS: filtramos los elementos validos, y tomamos
+        # solo el arreglo de datos, que ahora solo tiene datos validos
+        pmra = pmra[pmra.mask == False].data
+        # se obtiene un numpy array. (En este punto, pmra es un numpy array de datos validos con el
+        #  que se puede seguir trabajando)
+
+        # HACER LO MISMO PARA obtener PMDEC
+
+        # HACER LOS AJUSTES (LEER EL METODO plx_fit y hacerlo lo más parecido posible en estructura y tener en cuenta los comentarios que le puse)
+
+        # LAS FUNCIONES DE AJUSTE QUE SEAN NECESARIAS DEFINIRLAS AFUERA DE LA CLASE OCTABLE (leer lognegexp_normal y fijarse donde esta)
+
+        # DEVOLVER LO MISMO QUE EL METODO plx_fit: la solucion y 2 graficos: 1 con el histograma y funcion de pmra y otro con el histograma y funcion de pmdec

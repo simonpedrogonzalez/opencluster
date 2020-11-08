@@ -40,10 +40,6 @@ class TestDataRetriever:
             ra=130.62916667, dec=-48.1, frame="icrs", unit="deg"
         ).to_string("hmsdms")
 
-    def test_non_existent_catalog_simbad_search(self):
-        with pytest.raises(CatalogNotFoundException):
-            simbad_search("non existent table")
-
     def test_load(self):
         name = "ic2395"
         file = name + ".vot"
