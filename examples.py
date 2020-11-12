@@ -15,3 +15,18 @@ region(name="ic2395", radius=u.Quantity("30", u.arcminute)).select(
 ).from_table("public.hipparcos", ra_name="ra", dec_name="de").top(50).get(
     dump_to_file=True, output_file="test.vot"
 )
+
+from opencluster import load_file
+
+octable = load_file("ic2395.vot")
+
+octable.densities_plot()
+
+result = octable.fit_plx(
+    lower_lim=0,
+    upper_lim=2,
+    bins=30,
+    initial_params=[4.0, 0.1, 0.1, 1.0, 0.07, 1.3, 0.1],
+)
+result.get("fit")
+result.get("params")

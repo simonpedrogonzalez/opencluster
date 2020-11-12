@@ -30,4 +30,22 @@ load_file: load an OCTable from VOTable file
 ```python
 loaded_table = load_file(file)
 ```
-Getting membership probabilities based on multiple variables (under development)
+Fitting parallax distribution, based on a logarithmic and negative exponential functions to model the field, and a normal function to model the cluster. Initial parameters must be introduced, by observing the distribution. Parameters are (complete this section)
+
+```python
+from opencluster import load_file
+
+octable = load_file("ic2395.vot")
+
+octable.densities_plot()
+
+result = octable.fit_plx(
+    lower_lim=0,
+    upper_lim=2,
+    bins=30,
+    initial_params=[4.0, 0.1, 0.1, 1.0, 0.07, 1.3, 0.1],
+)
+result.get("fit")
+result.get("params")
+```
+

@@ -22,15 +22,12 @@ from astropy.coordinates import SkyCoord
 from astropy.utils.diff import report_diff_values
 
 from opencluster.opencluster import (
-    CatalogNotFoundException,
     list_remotes,
     load_file,
     load_remote,
     remote_info,
     simbad_search,
 )
-
-import pytest
 
 
 class TestDataRetriever:

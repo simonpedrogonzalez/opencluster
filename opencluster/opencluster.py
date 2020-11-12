@@ -28,6 +28,8 @@ from astroquery.utils.commons import coord_to_radec, radius_to_unit
 
 from attr import attrib, attrs, validators
 
+from matplotlib import pyplot as plt
+
 import numpy as np
 
 import scipy.optimize as opt
@@ -92,20 +94,7 @@ class Query:
     coords = attrib(default=None)
     ra_name = attrib(default=Gaia.MAIN_GAIA_TABLE_RA)
     dec_name = attrib(default=Gaia.MAIN_GAIA_TABLE_DEC)
-    columns = attrib(
-        default=[
-            "ra",
-            "ra_error",
-            "dec",
-            "dec_error",
-            "parallax",
-            "parallax_error",
-            "pmra",
-            "pmra_error",
-            "pmdec",
-            "pmdec_error",
-        ]
-    )
+    columns = attrib(default="*")
     available_tables = attrib(default=None)
 
     def where(self, condition):
@@ -269,19 +258,28 @@ def load_remote(
         return OCTable(result)
 
 
-def lognegexp_normal(params, x):
+def lognegexp_normal(par, x):
     return (
-        params[0] * np.log(x / params[1])
-        + params[2] * np.exp(-x / params[3])
-        + params[4]
-        / np.sqrt(2 * np.pi * params[6])
-        * np.exp(-((x - params[5]) ** 2) / (2 * (params[6] ** 2)))
+        (par[0] * np.log(x / par[1]))
+        + (par[2] * np.exp(-x / par[3]))
+        + (par[4] / np.sqrt(2 * np.pi * par[6]))
+        * np.exp(-((x - par[5]) ** 2) / (2 * (par[6] ** 2)))
     )
 
 
 def normalnegexp_normal():
     """alternative that uses piecewise defined function
     with normal|negative exponential for field, normal for cluster"""
+    ...
+
+
+# Esta función nos permite hacer un ajuste del campo
+#  y el cúmulo en pm y en las posiciones
+def two_normal(params, x):
+    # return (((params[4]/(np.sqrt(2.np.pi*params[1])))
+    # (np.exp(-((x-params[0])*2/(2(params[1])*2)))  ))
+    #   +  (  (params[5]/(np.sqrt(2.*np.pi*params[3])))
+    # (np.exp(-((x-params[2])*2/(2(params[3])**2))))  )  )
     ...
 
 
@@ -302,34 +300,54 @@ class OCTable:
         self,
         initial_params,
         plx_col: str = "parallax",
+        lower_lim: (float, int) = None,
+        upper_lim: (float, int) = None,
         pdfs: str = "lognegexp_normal",
         bins: (int, str) = "fd",
         ftol: float = 1.0e-12,
         gtol: float = 1.0e-12,
         xtol: float = 1.0e-12,
+        arenou_criterion: bool = True,
+        bp_rp_col: str = "bp_rp",
+        bp_rp_excess_factor_col: str = "phot_bp_rp_excess_factor",
         **kwargs,
     ):
 
-        # self.table tiene la tabla VOT
-        # toma la columna de paralaje de la tabla y le saca los datos con el .data
-        plx = self.table[plx_col].data
-        # en plx hay ahora un objeto con 2 arreglos, uno de datos (data) y uno de
-        # máscara (mask)
-        # hay un dato y una mascara por cada elemento. Si la mascara es True
-        # para un elemento, ese
-        # elemento en INVALIDO para hacer calculos. Los elementos que tienen
-        # mascara True son por
-        # ejemplo los nan y los infinitos.
-        # Tenemos que tomar solo los elementos VALIDOS:
-        #  filtramos los elementos validos,
-        #  y tomamos
-        # solo el arreglo de datos, que ahora solo tiene datos validos
-        plx = plx[plx.mask == False].data
-        # se obtiene un numpy array. (En este punto, plx
-        #  es un numpy array de datos
-        # validos con el que se puede seguir trabajando)
-        # ahi filtro por paralaje
-        plx = plx[plx > 0]
+        # get pandas dataframe from VOTable
+        df = self.table.to_pandas()
+
+        # select columns that are going to be used
+        columns = [plx_col]
+        if arenou_criterion:
+            columns += [bp_rp_col, bp_rp_excess_factor_col]
+        df = df[columns]
+
+        # discard nans and infs
+        indices_to_keep = ~df.isin([np.nan, np.inf, -np.inf]).any("columns")
+        df = df[indices_to_keep]
+
+        # apply arenou criterion
+        if arenou_criterion:
+            df = df.loc[
+                (1 + 0.015 * df[bp_rp_col] ** 2 < df[bp_rp_excess_factor_col])
+                & (
+                    df[bp_rp_excess_factor_col]
+                    < 1.3 + 0.06 * df[bp_rp_col] ** 2
+                )
+            ]
+
+        # apply parallax limits filter
+        if lower_lim is not None:
+            df = df.loc[(df[plx_col] >= lower_lim)]
+        else:
+            lower_lim = df[plx_col].min()
+        if upper_lim is not None:
+            df = df.loc[(df[plx_col] <= upper_lim)]
+        else:
+            upper_lim = df[plx_col].max()
+
+        # get the plx columns as a numpy array to start the procedure
+        plx = df[plx_col].to_numpy()
 
         # ponerle nombre significativo a las variables,
         #  por ejemplo his por histograma,
@@ -337,9 +355,13 @@ class OCTable:
         # aca notar que la variable bins puede ser un
         # numero o bien un string que indica el
         # metodo (ver en el encabezado de la funcion)
-        his, bin_edges = np.histogram(plx, bins=bins, density=True, **kwargs)
+        his, bin_edges = np.histogram(
+            plx, bins=30, density=True, range=(lower_lim, upper_lim)
+        )
+        bin_width = bin_edges[1] - bin_edges[0]
+        bin_center = bin_edges - bin_width / 2
+        freq = his * bin_width
         his = his / np.sum(his)
-        # bin_edges = bin_edges - (bin_edges[-1] - bin_edges[0]) / 2
 
         solution = opt.least_squares(
             # que signigica esta fun:
@@ -356,26 +378,31 @@ class OCTable:
             fun=lambda params, x, y: lognegexp_normal(params, x) - y,
             x0=np.array(initial_params),
             method="lm",
-            args=(bin_edges[1:], his),
+            args=(bin_center[1:], his),
             ftol=ftol,
             gtol=gtol,
             xtol=xtol,
         )
 
         # armo un eje con puntos "x" para graficar
-        linspace = np.linspace(bin_edges[0] + 0.1, bin_edges[-1], 10000)
+        x_fit = np.linspace(bin_edges[0] + 0.1, bin_edges[-1], 10000)
         # reutilizo la funcion para calcular los "y" del grafico
-        pdf = lognegexp_normal(solution.x, linspace)
+        y_fit = lognegexp_normal(solution.x, x_fit)
 
         # hago una figura con un sublplot
         fig = plt.figure(figsize=(8, 8))
         ax = fig.add_subplot(111)
         # le agrego el histograma del paralaje con la misma
         # cantidad de bines que usé en el ajuste
-        ax.hist(plx, len(bin_edges) - 1, normed=True)
+        ax.bar(
+            bin_edges[1:] - bin_width / 2, freq, 0.06, label="Plx distribution"
+        )
+
         # le agrego el grafico de la funcion de ajuste
-        ax.plot(linspace, pdf, lw=2)
+        ax.plot(x_fit, y_fit, lw=2, c="r", label="Parallax fit")
+
         fig.suptitle("Parallax fit")
+        fig.legend()
 
         # devuelvo un diccionario que tiene los parametros de la solucion
         # y el grafico para ver el ajuste
@@ -394,27 +421,17 @@ class OCTable:
     ):
         # Esta funcion tiene que ajustar el movimiento propio
         # tiene que recibir como parámetro todos lo que necesites
-        # EXCEPTO LOS DATOS de movimiento propio porque estos
-        # YA ESTAN dentro del mismo objeto
-        # OCTABLE. LOS DATOS se acceden así:
 
-        # self.table tiene la tabla VOT
-        # toma la columna de pmra de la tabla y le saca los datos con el .data
-        pmra = self.table[pmra_col].data
-        # en pmra hay ahora un objeto con 2 arreglos, uno de datos (data) y uno de máscara (mask)
-        # hay un dato y una mascara por cada elemento. Si la mascara es True para un elemento, ese
-        # elemento en INVALIDO para hacer calculos. Los elementos que tienen mascara True son por
-        # ejemplo los nan y los infinitos.
-        # Tenemos que tomar solo los elementos VALIDOS: filtramos los elementos validos, y tomamos
-        # solo el arreglo de datos, que ahora solo tiene datos validos
-        pmra = pmra[pmra.mask == False].data
-        # se obtiene un numpy array. (En este punto, pmra es un numpy array de datos validos con el
-        #  que se puede seguir trabajando)
+        # HACER LOS AJUSTES (LEER EL METODO plx_fit y hacerlo lo más
+        #  parecido posible en estructura y tener en cuenta
+        # los comentarios que le puse)
 
-        # HACER LO MISMO PARA obtener PMDEC
+        # LAS FUNCIONES DE AJUSTE QUE SEAN NECESARIAS DEFINIRLAS
+        #  AFUERA DE LA CLASE OCTABLE (leer lognegexp_normal y
+        #  fijarse donde esta)
 
-        # HACER LOS AJUSTES (LEER EL METODO plx_fit y hacerlo lo más parecido posible en estructura y tener en cuenta los comentarios que le puse)
-
-        # LAS FUNCIONES DE AJUSTE QUE SEAN NECESARIAS DEFINIRLAS AFUERA DE LA CLASE OCTABLE (leer lognegexp_normal y fijarse donde esta)
-
-        # DEVOLVER LO MISMO QUE EL METODO plx_fit: la solucion y 2 graficos: 1 con el histograma y funcion de pmra y otro con el histograma y funcion de pmdec
+        # DEVOLVER LO MISMO QUE EL METODO plx_fit:
+        #  la solucion y 2 graficos:
+        #  1 con el histograma y funcion de pmra y
+        #  otro con el histograma y funcion de pmdec
+        return None
