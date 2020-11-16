@@ -14,8 +14,19 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# =============================================================================
+# DOCS
+# =============================================================================
+
+"""Package for membership probability calculation from remote or local data."""
+
+# =============================================================================
+# IMPORTS
+# =============================================================================
+
 import inspect
 import io
+import warnings
 
 import astropy.units as u
 from astropy.coordinates import SkyCoord
@@ -36,6 +47,22 @@ import scipy.optimize as opt
 
 
 def checkargs(function):
+    """Check arguments match their annotated type.
+
+    Parameters
+    ----------
+    function : function
+
+    Returns
+    -------
+    function result
+
+    Raises
+    ------
+    TypeError
+    If argument does not match annotated type.
+    """
+
     def wrapper(*args, **kwargs):
         argnames = inspect.getfullargspec(function).args
         arguments = dict(kwargs)
@@ -55,8 +82,29 @@ def checkargs(function):
     return wrapper
 
 
-def simbad_search(id):
+@checkargs
+def simbad_search(id: str):
+    """Search an identifier in Simbad catalogues.
+
+    Parameters
+    ----------
+    id : str
+
+    Returns
+    -------
+    coordinates : astropy.coordinates.SkyCoord
+        Coordinates of object if found, None otherwise
+
+    Warns
+    ------
+    Identifier not found
+        If the identifier has not been found in Simbad Catalogues.
+    """
     result = Simbad.query_object(id)
+
+    if result is None:
+        warnings.warn("Identifier not found.")
+        return None
     ra = (
         np.array(result["RA"])[0].replace(" ", "h", 1).replace(" ", "m", 1)
         + "s"
@@ -70,6 +118,37 @@ def simbad_search(id):
 
 @attrs
 class Query:
+    """Query class to retrieve data from remote gaia catalogues.
+
+    Attributes
+    ----------
+    table : str, optional
+        Name of the Gaia catalogues table.
+        (default is astroquery.gaia.Gaia.MAIN_GAIA_TABLE)
+    ra_name : str, optional
+        Name of the column of right ascension column in the selected table.
+        (default is astroquery.gaia.Gaia.MAIN_GAIA_TABLE_RA)
+    dec_name : str, optional
+        Name of the declination column in the selected table.
+        (default is astroquery.gaia.Gaia.MAIN_GAIA_TABLE_DEC)
+    columns : str or list of str
+        If str, must be '*', indicating all columns
+        If list of str, must be list of valid column names.
+    column_filters : dict, optional
+        Dictionary of filters: {'column_name' : 'column_filter'}
+        column_name: str
+            Valid column in the selected table
+        column_filter: str
+            Must start with '<', '>', '<=', '>=' and end with a numeric value.
+    row_limit : int, optional
+        Limit of rows to retrieve from the remote table.
+        (default is -1, meaning all found rows)
+    radius : u.quantity.Quantity
+        Radius of the cone search.
+    coords : astropy.coordinates.SkyCoord
+        Coordinates of the center of the cone search.
+    QUERY_TEMPLATE : multiline str template used for the query
+    """
 
     QUERY_TEMPLATE = """
     SELECT
@@ -95,15 +174,52 @@ class Query:
     ra_name = attrib(default=Gaia.MAIN_GAIA_TABLE_RA)
     dec_name = attrib(default=Gaia.MAIN_GAIA_TABLE_DEC)
     columns = attrib(default="*")
-    available_tables = attrib(default=None)
 
-    def where(self, condition):
-        if not isinstance(condition, dict):
-            raise ValueError("condition must be dict: {'column': '> value'}")
-        self.column_filters = {**self.column_filters, **condition}
+    def where(self, column_filters):
+        """Add filters or conditions to the query.
+
+        Parameters
+        ----------
+        column_filters : dict, optional
+            Dictionary of filters: {'column_name' : 'column_filter'}
+            column_name: str
+                Valid column in the selected table
+            column_filter: str
+                Must start with '<', '>', '<=', '>='and end with a
+                numeric value.
+
+        Returns
+        -------
+        query : Query class instance
+
+        Raises
+        ------
+        ValueError if an attribute does not match type.
+        """
+        if not isinstance(column_filters, dict):
+            raise ValueError(
+                "column_filters must be dict: {'column': '> value'}"
+            )
+        self.column_filters = {**self.column_filters, **column_filters}
         return self
 
     def select(self, columns):
+        """Select table columns to be retrieved.
+
+        Parameters
+        ----------
+        columns : str or list of str
+            If str, must be '*', indicating all columns
+            If list of str, must be list of valid column names.
+
+        Returns
+        -------
+        query : Query class instance
+
+        Raises
+        ------
+        ValueError if an attribute does not match type.
+        """
         if columns != "*" and (
             not isinstance(columns, list)
             or not all(isinstance(elem, str) for elem in columns)
@@ -113,6 +229,28 @@ class Query:
         return self
 
     def from_table(self, table, ra_name=None, dec_name=None):
+        """Select Gaia table.
+
+        Parameters
+        ----------
+        table : str, optional
+            Name of the Gaia catalogues table
+            (default is astroquery.gaia.Gaia.MAIN_GAIA_TABLE)
+        ra_name : str, optional
+            Name of the column of right ascension column in the selected table.
+            (default is astroquery.gaia.Gaia.MAIN_GAIA_TABLE_RA)
+        dec_name : str, optional
+            Name of the declination column in the selected table.
+            (default is astroquery.gaia.Gaia.MAIN_GAIA_TABLE_DEC)
+
+        Returns
+        -------
+        query : Query class instance
+
+        Raises
+        ------
+        ValueError if an attribute does not match type.
+        """
         if not isinstance(table, str):
             raise ValueError("table must be string")
         if (ra_name, dec_name) != (None, None):
@@ -127,8 +265,12 @@ class Query:
         return self
 
     def build(self):
-        """parse things and do de query"""
+        """Build and perform query.
 
+        Returns
+        -------
+        query : string with built query.
+        """
         if self.columns != "*":
             columns = ",".join(map(str, self.columns))
         else:
@@ -169,13 +311,47 @@ class Query:
         return query
 
     def top(self, row_limit):
-        """set row limit"""
+        """Set row limit for the query.
+
+        Attributes
+        ----------
+        row_limit : int, optional
+            Limit of rows to retrieve from the remote table.
+            (default is -1, meaning all found rows)
+
+        Returns
+        -------
+        query : Query class instance
+
+        Raises
+        ------
+        ValueError if an attribute does not match type.
+        """
         if not isinstance(row_limit, int):
             raise ValueError("row_limit must be int")
         self.row_limit = row_limit
         return self
 
     def get(self, **kwargs):
+        """Build and performe query.
+
+        Parameters:
+        -----------
+        Parameters that are passed through **kwargs to
+        astroquery.gaia.Gaia.launch_job_async
+        For example:
+        dump_to_file : bool
+            If True, results will be stored in file
+            (default is False).
+        output_file : str
+            Name of the output file
+
+        Returns
+        -------
+        octable : opencluster.OCTable
+            Instance with query results,
+            None if dump_to_file is True
+        """
         query = self.build()
         job = Gaia.launch_job_async(query=query, **kwargs)
         if not kwargs.get("dump_to_file"):
@@ -184,6 +360,28 @@ class Query:
 
 
 def query_region(*, ra=None, dec=None, name=None, radius):
+    """Make a cone search type query for retrieving data.
+
+    Parameters
+    ----------
+    ra : int, float, optional
+        Right ascention of the center of the cone search.
+    dec : int, float, optional
+        Declination of the center of the cone search.
+    name : str, optional
+        Name of the Simbad identifier to set the center of the cone search.
+    radius : astropy.units.quantity.Quantity
+        Radius of the cone search.
+
+    Returns
+    -------
+    query : Query class instance
+
+    Raises
+    ------
+    ValueError if an attribute does not match type, or if
+    both name and ra & dec are provided.
+    """
     if not isinstance(radius, u.quantity.Quantity):
         raise ValueError("radious must be astropy.units.quantity.Quantity")
     if not ((name is not None) ^ (ra is not None and dec is not None)):
@@ -206,12 +404,39 @@ def query_region(*, ra=None, dec=None, name=None, radius):
 
 
 def list_remotes():
+    """List available tables in Gaia catalogues.
+
+    Returns
+    -------
+    tables : list of str
+        Available tables names
+    """
     available_tables = Gaia.load_tables()
-    return [table.get_qualified_name() for table in available_tables]
+    names = []
+    for table in available_tables:
+        name = table.get_qualified_name()
+        index = name.index(".") + 1
+        name = name[index:]
+        names.append(name)
+    return names
 
 
 @checkargs
 def remote_info(table: str):
+    """Remote table description and column names.
+
+    Parameters
+    ----------
+    table : str
+        valid table name from Gaia catalogues.
+
+    Returns
+    -------
+    description : str
+        Short text describing contents of the remote table.
+    cols : list of str
+        Column names of the remote table.
+    """
     table = Gaia.load_table(table)
     description = f"table = {table}"
     cols = [column.name for column in table.columns]
@@ -219,7 +444,18 @@ def remote_info(table: str):
 
 
 @checkargs
-def load_file(filepath_or_buffer: (str, io.IOBase) = None):
+def load_file(filepath_or_buffer: (str, io.IOBase)):
+    """Load a xml VOT table file as a OCTable instance.
+
+    Parameters
+    ----------
+    filepath_or_buffer : str or io.IOBase
+        Path of file or opened file
+
+    Returns
+    -------
+    octable : OCTable instance
+    """
     table = (
         parse(filepath_or_buffer)
         .get_first_table()
@@ -231,8 +467,8 @@ def load_file(filepath_or_buffer: (str, io.IOBase) = None):
 @checkargs
 def load_remote(
     *,
-    table: str = None,
-    columns=None,
+    table: str = Gaia.MAIN_GAIA_TABLE,
+    columns="*",
     filters=None,
     ra=None,
     dec=None,
@@ -241,7 +477,38 @@ def load_remote(
     limit=-1,
     **kwargs,
 ):
+    """Retrieve remote data from Gaia catalogues.
 
+    Parameters
+    ----------
+    table : str, optional
+        Name of the Gaia catalogues table.
+        (default is astroquery.gaia.Gaia.MAIN_GAIA_TABLE)
+    columns : str or list of str
+        If str, must be '*', indicating all columns
+        If list of str, must be list of valid column names.
+    filters : dict, optional
+        Dictionary of filters: {'column_name' : 'column_filter'}
+        column_name: str
+            Valid column in the selected table
+        column_filter: str
+            Must start with '<', '>', '<=', '>=' and end with a numeric value.
+    limit : int, optional
+        Limit of rows to retrieve from the remote table.
+        (default is -1, meaning all found rows)
+    radius : u.quantity.Quantity
+        Radius of the cone search.
+    ra : int, float, optional
+        Right ascention of the center of the cone search (default is None).
+    dec : int, float, optional
+        Declination of the center of the cone search (default is None).
+
+    Returns
+    -------
+    octable : opencluster.OCTable
+        Instance with query results,
+        None if dump_to_file is True.
+    """
     query = (
         query_region(name=name, ra=ra, dec=dec, radius=radius)
         .select(columns)
@@ -259,6 +526,23 @@ def load_remote(
 
 
 def lognegexp_normal(par, x):
+    """Calculate f(x) where f is parallax approximation function.
+
+    It models the field as the sum of log and negative exp,
+    and the cluster as a gaussian.
+
+    Parameters
+    ----------
+        par : array of float
+            Must contain in order: k, a, h, r, kc, u, s
+        x : float
+
+    Returns
+    -------
+    y : float
+        y = f(x) =
+        k.log(x/a) + h.e^(-x/r) + (kc/sqrt(2.pi.s)).e^(-((x-u)^2)/2.s^2)
+    """
     return (
         (par[0] * np.log(x / par[1]))
         + (par[2] * np.exp(-x / par[3]))
@@ -268,19 +552,26 @@ def lognegexp_normal(par, x):
 
 
 def normalnegexp_normal():
-    """alternative that uses piecewise defined function
-    with normal|negative exponential for field, normal for cluster"""
+    """Calculate f(x) where f is parallax approximation function.
+
+    Alternative that uses piecewise defined function
+    with normal|negative exponential for field, normal for cluster.
+    """
     ...
 
 
-# Esta función nos permite hacer un ajuste del campo
-#  y el cúmulo en pm y en las posiciones
-def two_normal(params, x):
-    # return (((params[4]/(np.sqrt(2.np.pi*params[1])))
-    # (np.exp(-((x-params[0])*2/(2(params[1])*2)))  ))
-    #   +  (  (params[5]/(np.sqrt(2.*np.pi*params[3])))
-    # (np.exp(-((x-params[2])*2/(2(params[3])**2))))  )  )
-    ...
+def two_normal(par, x):
+    """Calculate f(x) where f is proper motion approximation function.
+
+    Uses 2 normal distributions, one for the field and one for the cluster.
+    """
+    return (
+        (par[4] / (np.sqrt(2.0 * np.pi) * par[1]))
+        * (np.exp(-((x - par[0]) ** 2 / (2 * (par[1]) ** 2))))
+    ) + (
+        (par[5] / (np.sqrt(2.0 * np.pi) * par[3]))
+        * (np.exp(-((x - par[2]) ** 2 / (2 * (par[3]) ** 2))))
+    )
 
 
 @attrs(frozen=True)
@@ -414,24 +705,142 @@ class OCTable:
     @checkargs
     def fit_pm(
         self,
-        pmra_col: str = "pmra",  # tiene que recibir los nombres
-        # de las columnas que tienen los datos
-        pmdec_col: str = "pmdec",  # por defecto tienen
-        # los nombres que vienen en las tablas de gaia
+        initial_params_ra,
+        initial_params_dec,
+        pmra_col: str = "pmra",
+        pmdec_col: str = "pmdec",
+        plx_col: str = "parallax",
+        bp_rp_excess_factor_col: str = "phot_bp_rp_excess_factor",
+        g_mag: str = "phot_g_mean_mag",
+        bp_rp_col: str = "bp_rp",
+        pdfs: str = "two_normal",
+        bins: (int, str) = "fd",
+        ftol: float = 1.0e-12,
+        gtol: float = 1.0e-12,
+        xtol: float = 1.0e-12,
+        plx_lower_lim: (float, int) = None,
+        plx_upper_lim: (float, int) = None,
+        arenou_criterion: bool = True,
+        **kwargs,
     ):
         # Esta funcion tiene que ajustar el movimiento propio
         # tiene que recibir como parámetro todos lo que necesites
+        df = self.table.to_pandas()
 
-        # HACER LOS AJUSTES (LEER EL METODO plx_fit y hacerlo lo más
-        #  parecido posible en estructura y tener en cuenta
-        # los comentarios que le puse)
+        columns = [
+            pmra_col,
+            pmdec_col,
+            plx_col,
+            bp_rp_col,
+            bp_rp_excess_factor_col,
+        ]
+        df = df[columns]
 
-        # LAS FUNCIONES DE AJUSTE QUE SEAN NECESARIAS DEFINIRLAS
-        #  AFUERA DE LA CLASE OCTABLE (leer lognegexp_normal y
-        #  fijarse donde esta)
+        indices_to_keep = ~df.isin([np.nan, np.inf, -np.inf]).any("columns")
+        df = df[indices_to_keep]
 
-        # DEVOLVER LO MISMO QUE EL METODO plx_fit:
-        #  la solucion y 2 graficos:
-        #  1 con el histograma y funcion de pmra y
-        #  otro con el histograma y funcion de pmdec
-        return None
+        # Filtro en magnitud
+
+        df = df.loc[bp_rp_col < 14]
+
+        # Filtro fotométrico
+
+        df = df.loc[
+            (1 + 0.015 * df[bp_rp_col] ** 2 < df[bp_rp_excess_factor_col])
+            & (df[bp_rp_excess_factor_col] < 1.3 + 0.06 * df[bp_rp_col] ** 2)
+        ]
+
+        # Filtro de paralaje
+
+        if plx_lower_lim is not None:
+            df = df.loc[(df[plx_col] >= plx_lower_lim)]
+        else:
+            plx_lower_lim = df[plx_col].min()
+        if plx_upper_lim is not None:
+            df = df.loc[(df[plx_col] <= plx_upper_lim)]
+        else:
+            plx_upper_lim = df[plx_col].max()
+
+        pmra = df[pmra_col].to_numpy()
+        pmdec = df[pmdec_col].to_numpy()
+
+        # Ajuste en pmra
+
+        his, bin_edges_ra = np.histogram(pmra, bins=30, density=True)
+
+        bin_width_ra = bin_edges_ra[1] - bin_edges_ra[0]
+        bin_center_ra = bin_edges_ra - bin_width_ra / 2
+        freq_ra = his * bin_width_ra
+        his = his / np.sum(his)
+
+        solution_ra = opt.least_squares(
+            fun=lambda params, x, y: two_normal(params, x) - y,
+            x0=np.array(initial_params_ra),
+            method="lm",
+            args=(bin_center_ra[1:], his),
+            ftol=ftol,
+            gtol=gtol,
+            xtol=xtol,
+        )
+
+        x_fit_pmra = np.linspace(
+            bin_edges_ra[0] + 0.1, bin_edges_ra[-1], 10000
+        )
+
+        y_fit_pmra = lognegexp_normal(solution_ra.x, x_fit_pmra)
+
+        # Ajuste en pmdec
+
+        his, bin_edges_dec = np.histogram(pmdec, bins=30, density=True)
+
+        bin_width_dec = bin_edges_dec[1] - bin_edges_dec[0]
+        bin_center_dec = bin_edges_dec - bin_width_dec / 2
+        freq_dec = his * bin_width_dec
+        his = his / np.sum(his)
+
+        solution_dec = opt.least_squares(
+            fun=lambda params, x, y: two_normal(params, x) - y,
+            x0=np.array(initial_params_dec),
+            method="lm",
+            args=(bin_center_dec[1:], his),
+            ftol=ftol,
+            gtol=gtol,
+            xtol=xtol,
+        )
+
+        x_fit_pmdec = np.linspace(
+            bin_edges_dec[0] + 0.1, bin_edges_dec[-1], 10000
+        )
+
+        y_fit_pmdec = lognegexp_normal(solution_dec.x, x_fit_pmdec)
+
+        # hago una figura con un sublplot
+        plt.subplot(211)
+        plt.bar(
+            bin_edges_ra[1:] - bin_width_ra / 2,
+            freq_ra,
+            0.06,
+            label="Pmra distribution",
+        )
+
+        plt.plot(x_fit_pmra, y_fit_pmra, lw=2, c="r", label="Pmra fit")
+        plt.legend()
+        plt.ylabel("n")
+        plt.xlabel("pmra")
+
+        plt.subplot(212)
+        plt.bar(
+            bin_edges_dec[1:] - bin_width_dec / 2,
+            freq_dec,
+            0.06,
+            label="Pmdec distribution",
+        )
+
+        plt.plot(x_fit_pmdec, y_fit_pmdec, lw=2, c="r", label="Pmdec fit")
+        plt.legend()
+        plt.ylabel("n")
+        plt.xlabel("pmdec")
+
+        # devuelvo un diccionario que tiene los parametros de la solucion
+        # y el grafico para ver el ajuste
+        return {"params_pmra": solution_ra.x, "params_mdec": solution_dec.x}

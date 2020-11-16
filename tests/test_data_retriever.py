@@ -32,7 +32,6 @@ from opencluster.opencluster import (
 
 class TestDataRetriever:
     def test_correct_simbad_search(self):
-        # check exact values
         assert simbad_search("ic2395").to_string("hmsdms") == SkyCoord(
             ra=130.62916667, dec=-48.1, frame="icrs", unit="deg"
         ).to_string("hmsdms")
