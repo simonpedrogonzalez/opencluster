@@ -167,7 +167,7 @@ class Query:
     """
 
     table = attrib(default=Gaia.MAIN_GAIA_TABLE)
-    column_filters = attrib(default=dict())
+    column_filters = attrib(factory=dict)
     row_limit = attrib(default=-1)
     radius = attrib(default=None)
     coords = attrib(default=None)
@@ -566,11 +566,13 @@ def two_normal(par, x):
     Uses 2 normal distributions, one for the field and one for the cluster.
     """
     return (
-        (par[4] / (np.sqrt(2.0 * np.pi) * par[1]))
-        * (np.exp(-((x - par[0]) ** 2 / (2 * (par[1]) ** 2))))
+        par[4]
+        / np.sqrt(2.0 * np.pi * par[1])
+        * np.exp(-((x - par[0]) ** 2 / (2 * par[1] ** 2)))
     ) + (
-        (par[5] / (np.sqrt(2.0 * np.pi) * par[3]))
-        * (np.exp(-((x - par[2]) ** 2 / (2 * (par[3]) ** 2))))
+        par[5]
+        / np.sqrt(2.0 * np.pi * par[3])
+        * np.exp(-((x - par[2]) ** 2 / (2 * par[3] ** 2)))
     )
 
 
@@ -637,35 +639,17 @@ class OCTable:
         else:
             upper_lim = df[plx_col].max()
 
-        # get the plx columns as a numpy array to start the procedure
         plx = df[plx_col].to_numpy()
 
-        # ponerle nombre significativo a las variables,
-        #  por ejemplo his por histograma,
-        # bin_edges, por bordes de los bines
-        # aca notar que la variable bins puede ser un
-        # numero o bien un string que indica el
-        # metodo (ver en el encabezado de la funcion)
         his, bin_edges = np.histogram(
             plx, bins=30, density=True, range=(lower_lim, upper_lim)
         )
         bin_width = bin_edges[1] - bin_edges[0]
         bin_center = bin_edges - bin_width / 2
-        freq = his * bin_width
+        # freq = his * bin_width
         his = his / np.sum(his)
 
         solution = opt.least_squares(
-            # que signigica esta fun:
-            # la funcion se pone así porque NO quiero incluir
-            # el "- y" dentro de la funcion
-            # porque después quiero poder usar lognegexp_normal para
-            # sacar los "y" para graficar
-            # la funcion. SI le pongo el - y adentro, solo me sirve
-            # para calcular los residuos y
-            # no la puedo reutilizar.
-            # por eso pongo una lambda, que toma x, parametros e y,
-            # y calcula el resultado de la funcion
-            # para x con parametros=params, y luego le resta y
             fun=lambda params, x, y: lognegexp_normal(params, x) - y,
             x0=np.array(initial_params),
             method="lm",
@@ -675,32 +659,10 @@ class OCTable:
             xtol=xtol,
         )
 
-        # armo un eje con puntos "x" para graficar
-        x_fit = np.linspace(bin_edges[0] + 0.1, bin_edges[-1], 10000)
-        # reutilizo la funcion para calcular los "y" del grafico
-        y_fit = lognegexp_normal(solution.x, x_fit)
+        solution["histogram"] = his
+        solution["bin_edges"] = bin_edges
 
-        # hago una figura con un sublplot
-        fig = plt.figure(figsize=(8, 8))
-        ax = fig.add_subplot(111)
-        # le agrego el histograma del paralaje con la misma
-        # cantidad de bines que usé en el ajuste
-        ax.bar(
-            bin_edges[1:] - bin_width / 2, freq, 0.06, label="Plx distribution"
-        )
-
-        # le agrego el grafico de la funcion de ajuste
-        ax.plot(x_fit, y_fit, lw=2, c="r", label="Parallax fit")
-
-        fig.suptitle("Parallax fit")
-        fig.legend()
-
-        # devuelvo un diccionario que tiene los parametros de la solucion
-        # y el grafico para ver el ajuste
-        return {
-            "params": solution.x,
-            "fit": fig,
-        }
+        return solution
 
     @checkargs
     def fit_pm(
@@ -714,7 +676,8 @@ class OCTable:
         g_mag: str = "phot_g_mean_mag",
         bp_rp_col: str = "bp_rp",
         pdfs: str = "two_normal",
-        bins: (int, str) = "fd",
+        bins_pmra: (int, str) = "fd",
+        bins_pmdec: (int, str) = "fd",
         ftol: float = 1.0e-12,
         gtol: float = 1.0e-12,
         xtol: float = 1.0e-12,
@@ -723,8 +686,6 @@ class OCTable:
         arenou_criterion: bool = True,
         **kwargs,
     ):
-        # Esta funcion tiene que ajustar el movimiento propio
-        # tiene que recibir como parámetro todos lo que necesites
         df = self.table.to_pandas()
 
         columns = [
@@ -741,7 +702,7 @@ class OCTable:
 
         # Filtro en magnitud
 
-        df = df.loc[bp_rp_col < 14]
+        df = df.loc[df[bp_rp_col] < 14]
 
         # Filtro fotométrico
 
@@ -766,13 +727,12 @@ class OCTable:
 
         # Ajuste en pmra
 
-        his, bin_edges_ra = np.histogram(pmra, bins=30, density=True)
+        his, bin_edges_ra = np.histogram(pmra, bins=bins_pmra, density=True)
 
         bin_width_ra = bin_edges_ra[1] - bin_edges_ra[0]
         bin_center_ra = bin_edges_ra - bin_width_ra / 2
         freq_ra = his * bin_width_ra
         his = his / np.sum(his)
-
         solution_ra = opt.least_squares(
             fun=lambda params, x, y: two_normal(params, x) - y,
             x0=np.array(initial_params_ra),
@@ -783,15 +743,21 @@ class OCTable:
             xtol=xtol,
         )
 
+        solution_ra["histogram"] = his
+        solution_ra["bin_edges"] = bin_edges_ra
+
         x_fit_pmra = np.linspace(
             bin_edges_ra[0] + 0.1, bin_edges_ra[-1], 10000
         )
 
-        y_fit_pmra = lognegexp_normal(solution_ra.x, x_fit_pmra)
+        y_fit_pmra = two_normal(solution_ra.x, x_fit_pmra)
+
+        fig = plt.figure()  # figsize=(16, 8))
+        ax_pmra = fig.add_subplot(121)
 
         # Ajuste en pmdec
 
-        his, bin_edges_dec = np.histogram(pmdec, bins=30, density=True)
+        his, bin_edges_dec = np.histogram(pmdec, bins=bins_pmdec, density=True)
 
         bin_width_dec = bin_edges_dec[1] - bin_edges_dec[0]
         bin_center_dec = bin_edges_dec - bin_width_dec / 2
@@ -808,39 +774,38 @@ class OCTable:
             xtol=xtol,
         )
 
+        solution_dec["histogram"] = his
+        solution_dec["bin_edges"] = bin_center_dec
+
         x_fit_pmdec = np.linspace(
             bin_edges_dec[0] + 0.1, bin_edges_dec[-1], 10000
         )
 
-        y_fit_pmdec = lognegexp_normal(solution_dec.x, x_fit_pmdec)
+        y_fit_pmdec = two_normal(solution_dec.x, x_fit_pmdec)
 
         # hago una figura con un sublplot
-        plt.subplot(211)
-        plt.bar(
+        ax_pmde = fig.add_subplot(222)
+
+        ax_pmra.bar(
             bin_edges_ra[1:] - bin_width_ra / 2,
             freq_ra,
-            0.06,
+            0.5,
             label="Pmra distribution",
         )
 
-        plt.plot(x_fit_pmra, y_fit_pmra, lw=2, c="r", label="Pmra fit")
-        plt.legend()
-        plt.ylabel("n")
-        plt.xlabel("pmra")
+        ax_pmra.plot(x_fit_pmra, y_fit_pmra, lw=2, c="r", label="Pmra fit")
+        ax_pmra.legend()
 
-        plt.subplot(212)
-        plt.bar(
+        ax_pmde.bar(
             bin_edges_dec[1:] - bin_width_dec / 2,
             freq_dec,
-            0.06,
+            0.5,
             label="Pmdec distribution",
         )
 
-        plt.plot(x_fit_pmdec, y_fit_pmdec, lw=2, c="r", label="Pmdec fit")
-        plt.legend()
-        plt.ylabel("n")
-        plt.xlabel("pmdec")
+        ax_pmde.plot(x_fit_pmdec, y_fit_pmdec, lw=2, c="r", label="Pmdec fit")
+        ax_pmde.legend()
 
         # devuelvo un diccionario que tiene los parametros de la solucion
         # y el grafico para ver el ajuste
-        return {"params_pmra": solution_ra.x, "params_mdec": solution_dec.x}
+        return {"solution_pmra": solution_ra, "solution_pmdec": solution_dec}
