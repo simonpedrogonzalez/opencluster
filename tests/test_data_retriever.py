@@ -25,16 +25,70 @@ from opencluster.opencluster import (
     list_remotes,
     load_file,
     load_remote,
+    query_region,
     remote_info,
     simbad_search,
 )
 
+import pytest
+
 
 class TestDataRetriever:
-    def test_correct_simbad_search(self):
+    def test_simbad_search(self):
         assert simbad_search("ic2395").to_string("hmsdms") == SkyCoord(
             ra=130.62916667, dec=-48.1, frame="icrs", unit="deg"
         ).to_string("hmsdms")
+
+        assert simbad_search("thing") is None
+
+    def test_data_validation(self):
+        with pytest.raises(ValueError):
+            load_remote(radius="a")
+        with pytest.raises(ValueError):
+            load_remote(radius=1)
+        with pytest.raises(ValueError):
+            load_remote(ra=130.62916667, radius=u.Quantity("30", u.arcminute))
+        with pytest.raises(ValueError):
+            load_remote(
+                name="ic2395",
+                ra=130.62916667,
+                radius=u.Quantity("30", u.arcminute),
+            )
+        with pytest.raises(ValueError):
+            load_remote(dec=130.62916667, radius=u.Quantity("30", u.arcsecond))
+        with pytest.raises(ValueError):
+            load_remote(name=3, radius=u.Quantity("1", u.degree))
+        with pytest.raises(ValueError):
+            load_remote(
+                name="ic2395",
+                radius=u.Quantity("30", u.arcminute),
+                row_limit=0.1,
+            )
+        with pytest.raises(KeyError):
+            load_remote(
+                table="gaiadr2.gaia_source",
+                name="ic2395",
+                radius=u.Quantity("30", u.arcminute),
+                limit=55,
+                columns=["ra", "dec", "pmra", "pmdec"],
+                filters={"phot_g_mean_mag": "<12"},
+            )
+
+    def test_query_build(self):
+
+        query = (
+            query_region(
+                ra=130.62916667,
+                dec=-48.1,
+                radius=u.Quantity("30", u.arcminute),
+            )
+            .from_table("gaiadr2.gaia_source")
+            .select(["ra", "dec", "pmra", "pmdec", "phot_g_mean_mag"])
+            .where({"phot_g_mean_mag": "<15"})
+            .top(55)
+            .build()
+        )
+        print(query)
 
     def test_load(self):
         name = "ic2395"

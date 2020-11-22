@@ -39,8 +39,6 @@ from astroquery.utils.commons import coord_to_radec, radius_to_unit
 
 from attr import attrib, attrs, validators
 
-from matplotlib import pyplot as plt
-
 import numpy as np
 
 import scipy.optimize as opt
@@ -195,11 +193,17 @@ class Query:
         Raises
         ------
         ValueError if an attribute does not match type.
+        KeyError if columns is not '*' and filter has invalid column.
         """
         if not isinstance(column_filters, dict):
             raise ValueError(
                 "column_filters must be dict: {'column': '> value'}"
             )
+        if self.columns != '*':
+            for col in column_filters.keys():
+                if col not in self.columns:
+                    raise KeyError("invalid column in filter")
+
         self.column_filters = {**self.column_filters, **column_filters}
         return self
 
@@ -228,7 +232,8 @@ class Query:
         self.columns = columns
         return self
 
-    def from_table(self, table, ra_name=None, dec_name=None):
+    @checkargs
+    def from_table(self, table, ra_name:str=None, dec_name:str=None):
         """Select Gaia table.
 
         Parameters
@@ -251,16 +256,8 @@ class Query:
         ------
         ValueError if an attribute does not match type.
         """
-        if not isinstance(table, str):
-            raise ValueError("table must be string")
-        if (ra_name, dec_name) != (None, None):
-            if not isinstance(ra_name, str) or not isinstance(dec_name, str):
-                raise ValueError(
-                    "ra and dec parameter names in table must be string"
-                )
-            else:
-                self.ra_name = ra_name
-                self.dec_name = dec_name
+        self.ra_name = ra_name
+        self.dec_name = dec_name
         self.table = table
         return self
 
@@ -305,9 +302,7 @@ class Query:
             )
             query += query_filters
 
-        query += """ORDER BY
-                dist ASC
-                 """
+        query += """ORDER BY dist ASC"""
         return query
 
     def top(self, row_limit):
@@ -583,10 +578,14 @@ class OCTable:
     def __getattr__(self, a):
         return getattr(self.table, a)
 
-    def densities_plot(self, bins=100):
-        df = self.table.to_pandas()
-        plot = df.hist(bins=bins, grid=True, legend=True)
-        return plot
+    def __getitem__(self, a):
+        return self.table[a]
+
+    def __iter__(self):
+        return iter(self.table)
+
+    def __len__(self):
+        return len(self.table)
 
     @checkargs
     def fit_plx(
@@ -731,7 +730,7 @@ class OCTable:
 
         bin_width_ra = bin_edges_ra[1] - bin_edges_ra[0]
         bin_center_ra = bin_edges_ra - bin_width_ra / 2
-        freq_ra = his * bin_width_ra
+        # freq_ra = his * bin_width_ra
         his = his / np.sum(his)
         solution_ra = opt.least_squares(
             fun=lambda params, x, y: two_normal(params, x) - y,
@@ -746,22 +745,13 @@ class OCTable:
         solution_ra["histogram"] = his
         solution_ra["bin_edges"] = bin_edges_ra
 
-        x_fit_pmra = np.linspace(
-            bin_edges_ra[0] + 0.1, bin_edges_ra[-1], 10000
-        )
-
-        y_fit_pmra = two_normal(solution_ra.x, x_fit_pmra)
-
-        fig = plt.figure()  # figsize=(16, 8))
-        ax_pmra = fig.add_subplot(121)
-
         # Ajuste en pmdec
 
         his, bin_edges_dec = np.histogram(pmdec, bins=bins_pmdec, density=True)
 
         bin_width_dec = bin_edges_dec[1] - bin_edges_dec[0]
         bin_center_dec = bin_edges_dec - bin_width_dec / 2
-        freq_dec = his * bin_width_dec
+        # freq_dec = his * bin_width_dec
         his = his / np.sum(his)
 
         solution_dec = opt.least_squares(
@@ -777,35 +767,4 @@ class OCTable:
         solution_dec["histogram"] = his
         solution_dec["bin_edges"] = bin_center_dec
 
-        x_fit_pmdec = np.linspace(
-            bin_edges_dec[0] + 0.1, bin_edges_dec[-1], 10000
-        )
-
-        y_fit_pmdec = two_normal(solution_dec.x, x_fit_pmdec)
-
-        # hago una figura con un sublplot
-        ax_pmde = fig.add_subplot(222)
-
-        ax_pmra.bar(
-            bin_edges_ra[1:] - bin_width_ra / 2,
-            freq_ra,
-            0.5,
-            label="Pmra distribution",
-        )
-
-        ax_pmra.plot(x_fit_pmra, y_fit_pmra, lw=2, c="r", label="Pmra fit")
-        ax_pmra.legend()
-
-        ax_pmde.bar(
-            bin_edges_dec[1:] - bin_width_dec / 2,
-            freq_dec,
-            0.5,
-            label="Pmdec distribution",
-        )
-
-        ax_pmde.plot(x_fit_pmdec, y_fit_pmdec, lw=2, c="r", label="Pmdec fit")
-        ax_pmde.legend()
-
-        # devuelvo un diccionario que tiene los parametros de la solucion
-        # y el grafico para ver el ajuste
         return {"solution_pmra": solution_ra, "solution_pmdec": solution_dec}
