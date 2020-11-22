@@ -233,7 +233,7 @@ class Query:
         return self
 
     @checkargs
-    def from_table(self, table, ra_name:str=None, dec_name:str=None):
+    def from_table(self, table:str, ra_name:str=None, dec_name:str=None):
         """Select Gaia table.
 
         Parameters
@@ -352,7 +352,6 @@ class Query:
         if not kwargs.get("dump_to_file"):
             table = job.get_results()
             return table
-
 
 def query_region(*, ra=None, dec=None, name=None, radius):
     """Make a cone search type query for retrieving data.
@@ -506,13 +505,11 @@ def load_remote(
     """
     query = (
         query_region(name=name, ra=ra, dec=dec, radius=radius)
+        .from_table(table)
         .select(columns)
         .where(filters)
         .top(limit)
     )
-
-    if table is not None:
-        query.from_table(table)
 
     result = query.get(**kwargs)
 

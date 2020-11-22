@@ -117,8 +117,10 @@ class TestDataRetriever:
             os.remove(file)
 
     def test_info(self):
+        remote_list = list_remotes()
+        assert "gaiadr2.gaia_source" in remote_list
+        assert "public.hipparcos" in remote_list
         desc, columns = remote_info("public.hipparcos")
-        assert len(list_remotes()) == 95
         assert len(columns) == 78
         assert (
             desc
