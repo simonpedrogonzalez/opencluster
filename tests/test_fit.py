@@ -20,15 +20,21 @@ import numpy as np
 
 from opencluster.opencluster import load_remote
 
+import pytest
+
+
+@pytest.fixture(scope="session", autouse=True)
+def octable():
+    return load_remote(
+        name="ic2395",
+        radius=u.Quantity("30", u.arcminute),
+        filters={"phot_g_mean_mag": "<= 14", "parallax": ">0"},
+    )
+    # return load_file("opencluster/ic2395.vot")
+
 
 class TestFit:
-    def test_plx_fit(self):
-
-        octable = load_remote(
-            name="ic2395",
-            radius=u.Quantity("30", u.arcminute),
-            filters={"phot_g_mean_mag": "<= 14", "parallax": ">0"},
-        )
+    def test_plx_fit(self, octable):
 
         result = octable.fit_plx(
             lower_lim=0,
@@ -48,5 +54,41 @@ class TestFit:
                 0.04344376,
             ]
         )
-        error = np.sum(np.square(solution - result.get("params")))
-        assert error < 1.0e-15
+
+        np.testing.assert_array_almost_equal(result.x, solution)
+
+    def test_pm_fit(self, octable):
+        result = octable.fit_pm(
+            initial_params_ra=[-4.0, 0.6, 0.2, 3.6, 6.0, 0.03],
+            initial_params_dec=[4.0, 0.8, 0.5, 8.4, 5.0, 0.07],
+            bins=60,
+            plx_lower_lim=0,
+            plx_upper_lim=2,
+        )
+        solution_pmra = np.array(
+            [
+                -4.31577558,
+                0.64112027,
+                -4.69865038,
+                2.48052096,
+                0.14776007,
+                0.27382957,
+            ]
+        )
+        solution_pmdec = np.array(
+            [
+                3.80299902,
+                0.85536873,
+                5.25105991,
+                2.80916489,
+                0.23382906,
+                0.1937844,
+            ]
+        )
+
+        np.testing.assert_array_almost_equal(
+            result["solution_pmra"].x, solution_pmra
+        )
+        np.testing.assert_array_almost_equal(
+            result["solution_pmdec"].x, solution_pmdec
+        )

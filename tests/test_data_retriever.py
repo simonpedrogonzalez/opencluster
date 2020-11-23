@@ -25,7 +25,6 @@ from opencluster.opencluster import (
     list_remotes,
     load_file,
     load_remote,
-    query_region,
     remote_info,
     simbad_search,
 )
@@ -60,9 +59,7 @@ class TestDataRetriever:
             load_remote(name=3, radius=u.Quantity("1", u.degree))
         with pytest.raises(ValueError):
             load_remote(
-                name="ic2395",
-                radius=u.Quantity("30", u.arcminute),
-                row_limit=0.1,
+                name="ic2395", radius=u.Quantity("30", u.arcminute), limit=0.1
             )
         with pytest.raises(KeyError):
             load_remote(
@@ -73,22 +70,6 @@ class TestDataRetriever:
                 columns=["ra", "dec", "pmra", "pmdec"],
                 filters={"phot_g_mean_mag": "<12"},
             )
-
-    def test_query_build(self):
-
-        query = (
-            query_region(
-                ra=130.62916667,
-                dec=-48.1,
-                radius=u.Quantity("30", u.arcminute),
-            )
-            .from_table("gaiadr2.gaia_source")
-            .select(["ra", "dec", "pmra", "pmdec", "phot_g_mean_mag"])
-            .where({"phot_g_mean_mag": "<15"})
-            .top(55)
-            .build()
-        )
-        print(query)
 
     def test_load(self):
         name = "ic2395"

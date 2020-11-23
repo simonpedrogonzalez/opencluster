@@ -130,14 +130,14 @@ class Query:
         Name of the declination column in the selected table.
         (default is astroquery.gaia.Gaia.MAIN_GAIA_TABLE_DEC)
     columns : str or list of str
-        If str, must be '*', indicating all columns
-        If list of str, must be list of valid column names.
+        If str, must be '*', indicating all columns. If list of str,
+        must be list of valid column names.
     column_filters : dict, optional
         Dictionary of filters: {'column_name' : 'column_filter'}
         column_name: str
-            Valid column in the selected table
+        Valid column in the selected table
         column_filter: str
-            Must start with '<', '>', '<=', '>=' and end with a numeric value.
+        Must start with '<', '>', '<=', '>=' and end with a numeric value.
     row_limit : int, optional
         Limit of rows to retrieve from the remote table.
         (default is -1, meaning all found rows)
@@ -181,10 +181,10 @@ class Query:
         column_filters : dict, optional
             Dictionary of filters: {'column_name' : 'column_filter'}
             column_name: str
-                Valid column in the selected table
+            Valid column in the selected table
             column_filter: str
-                Must start with '<', '>', '<=', '>='and end with a
-                numeric value.
+            Must start with '<', '>', '<=', '>='and end with a
+            numeric value.
 
         Returns
         -------
@@ -195,16 +195,17 @@ class Query:
         ValueError if an attribute does not match type.
         KeyError if columns is not '*' and filter has invalid column.
         """
-        if not isinstance(column_filters, dict):
-            raise ValueError(
-                "column_filters must be dict: {'column': '> value'}"
-            )
-        if self.columns != '*':
-            for col in column_filters.keys():
-                if col not in self.columns:
-                    raise KeyError("invalid column in filter")
+        if column_filters:
+            if not isinstance(column_filters, dict):
+                raise ValueError(
+                    "column_filters must be dict: {'column': '> value'}"
+                )
+            if self.columns != "*":
+                for col in column_filters.keys():
+                    if col not in self.columns:
+                        raise KeyError("invalid column in filter")
 
-        self.column_filters = {**self.column_filters, **column_filters}
+            self.column_filters = {**self.column_filters, **column_filters}
         return self
 
     def select(self, columns):
@@ -233,7 +234,9 @@ class Query:
         return self
 
     @checkargs
-    def from_table(self, table:str, ra_name:str=None, dec_name:str=None):
+    def from_table(
+        self, table: str, ra_name: str = None, dec_name: str = None
+    ):
         """Select Gaia table.
 
         Parameters
@@ -330,8 +333,8 @@ class Query:
     def get(self, **kwargs):
         """Build and performe query.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         Parameters that are passed through **kwargs to
         astroquery.gaia.Gaia.launch_job_async
         For example:
@@ -352,6 +355,7 @@ class Query:
         if not kwargs.get("dump_to_file"):
             table = job.get_results()
             return table
+
 
 def query_region(*, ra=None, dec=None, name=None, radius):
     """Make a cone search type query for retrieving data.
@@ -570,18 +574,32 @@ def two_normal(par, x):
 
 @attrs(frozen=True)
 class OCTable:
+    """Class that contains data offers fit methods.
+
+    Attributes
+    ----------
+    table : astropy.table.table
+    """
+
     table = attrib(validator=validators.instance_of(Table))
 
     def __getattr__(self, a):
+        """Get a named attribute from an table; getattr(x, 'y') is equivalent to x.y.
+
+        All astropy.table.table attributs are can be accessed.
+        """
         return getattr(self.table, a)
 
     def __getitem__(self, a):
+        """Get item from contained astropy.table.table."""
         return self.table[a]
 
     def __iter__(self):
+        """Get iterable from contained astropy.table.table."""
         return iter(self.table)
 
     def __len__(self):
+        """Get table length."""
         return len(self.table)
 
     @checkargs
@@ -591,7 +609,7 @@ class OCTable:
         plx_col: str = "parallax",
         lower_lim: (float, int) = None,
         upper_lim: (float, int) = None,
-        pdfs: str = "lognegexp_normal",
+        function: str = "lognegexp_normal",
         bins: (int, str) = "fd",
         ftol: float = 1.0e-12,
         gtol: float = 1.0e-12,
@@ -601,7 +619,63 @@ class OCTable:
         bp_rp_excess_factor_col: str = "phot_bp_rp_excess_factor",
         **kwargs,
     ):
+        """Fits a custom function to the parallax histogram.
 
+        It uses scipy least-squeares Levemberg-Marquardt algorithm.
+
+        Parameters
+        ----------
+        function : function
+            Fitting function used. Default is "lognegexp", a 7
+            parameter function:
+            parameters = [k, a, h, r, kc, u, s]
+            y = f(x) =
+            k.log(x/a) + h.e^(-x/r) + (kc/sqrt(2.pi.s)).e^(-((x-u)^2)/2.s^2)
+        initial_params : list of float
+            Initial parameters to star the least squares process.
+        plx_col : str, optional
+            Name of the parallax column in the dataset (default 'parallax').
+        lower_lim: float, int, optional
+            Lower parallax limit to take into account.
+        upper_lim: float, int, optional
+            Upper parallax limit to take into account.
+        bins: int, str
+            Number of bins to be used or str containing numpy.histogram
+            method for calculating number of bins (default is 'fd').
+        ftol: float
+            Tolerance for termination by the change of the cost function
+            in least squeares method. Default is 1.0e-12.
+        gtol: float
+            Tolerance for termination by the norm of the gradient
+            in least squares method. Default is 1.0e-12.
+        xtol: float
+            Tolerance for termination by the change of the independent
+            variables in least squares method. Default is 1.0e-12.
+        arenou_criterion: bool
+            Indicates if arenou criterion is used to filter the data
+            before fitting.
+            Default is True.
+            Arenou criterion = True if:
+            1 + 0.015(BP-RP)^2 < E <1.3 + 0.006(BP-RP)^2
+            where E is photometric BP-RP excess factor.
+        bp_rp_col: str
+            Name of BP-RP column in the dataset. Default is 'bp_rp'.
+        bp_rp_excess_factor_col: str
+            Name of the BP-RP excess factor column in the dataset.
+            Default is 'phot_bp_rp_excess_factor'.
+
+        Returns
+        -------
+        result: scipy.optimize.OptimizeResult with least squares result
+        and two more attributes:
+            histogram, bin_edges: result of numpy.histogram
+            applied to parallax data.
+
+        Raises
+        ------
+        TypeError
+        If argument does not match annotated type.
+        """
         # get pandas dataframe from VOTable
         df = self.table.to_pandas()
 
@@ -669,9 +743,8 @@ class OCTable:
         pmdec_col: str = "pmdec",
         plx_col: str = "parallax",
         bp_rp_excess_factor_col: str = "phot_bp_rp_excess_factor",
-        g_mag: str = "phot_g_mean_mag",
         bp_rp_col: str = "bp_rp",
-        pdfs: str = "two_normal",
+        function: str = "two_normal",
         bins_pmra: (int, str) = "fd",
         bins_pmdec: (int, str) = "fd",
         ftol: float = 1.0e-12,
@@ -682,6 +755,78 @@ class OCTable:
         arenou_criterion: bool = True,
         **kwargs,
     ):
+        """Fits customs functions to pmra and pmdex histograms.
+
+        It uses scipy least-squeares Levemberg-Marquardt algorithm.
+
+        Parameters
+        ----------
+        function : function
+            Fitting function used. Default is "two_normal", a 6 parameter
+            function: parameters = [u1, s1, u2, s2, k1, k2]
+            y = f(x) =
+            k1/sqrt(2.pi.s1)).e^(-((x-u1)^2)/2.s1^2) +
+            k2/sqrt(2.pi.s2)).e^(-((x-u2)^2)/2.s2^2)
+        initial_params_pmra : list of float
+            Initial parameters to star the least squares process.
+            Used to fit pmra.
+        initial_params_pmdec : list of float
+            Initial parameters to star the least squares process.
+            Used to fit pmdec.
+        plx_col : str, optional
+            Name of the parallax column in the dataset
+            (default 'parallax').
+        pmra_col : str, optional
+            Name of the pmra column in the dataset (default 'pmra').
+        pmdec_col : str, optional
+            Name of the pmdec column in the dataset (default 'pmdec').
+        plx_lower_lim: float, int, optional
+            Lower parallax limit to take into account.
+        plx_upper_lim: float, int, optional
+            Upper parallax limit to take into account.
+        bins_pmra: int, str
+            Number of bins to be used or str containing numpy.histogram
+            method for calculating number of bins (default is 'fd').
+            Used for pmra histogram.
+        bins_pmdec: int, str
+            Number of bins to be used or str containing numpy.histogram
+            method for calculating number of bins (default is 'fd').
+            Used for pmdec histogram.
+        ftol: float
+            Tolerance for termination by the change of the cost function
+            in least squeares method. Default is 1.0e-12.
+        gtol: float
+            Tolerance for termination by the norm of the gradient in
+            least squares method. Default is 1.0e-12.
+        xtol: float
+            Tolerance for termination by the change of the independent
+            variables in least squares method. Default is 1.0e-12.
+        arenou_criterion: bool
+            Indicates if arenou criterion is used to filter the data
+            before fitting. Default is True.
+            Arenou criterion = True if:
+            1 + 0.015(BP-RP)^2 < E <1.3 + 0.006(BP-RP)^2
+            where E is photometric BP-RP excess factor.
+        bp_rp_col: str
+            Name of BP-RP column in the dataset. Default is 'bp_rp'.
+        bp_rp_excess_factor_col: str
+            Name of the BP-RP excess factor column in the dataset.
+            Default is 'phot_bp_rp_excess_factor'.
+
+        Returns
+        -------
+        result: dict with two keys: solution_pmra and solution_pmdec.
+        Each solution is a scipy.optimize.OptimizeResult with least
+        squares result
+        and two more attributes:
+            histogram, bin_edges: result of numpy.histogram applied
+            to parallax data.
+
+        Raises
+        ------
+        TypeError
+        If argument does not match annotated type.
+        """
         df = self.table.to_pandas()
 
         columns = [

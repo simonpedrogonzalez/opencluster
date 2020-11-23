@@ -1,0 +1,425 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>opencluster package &#8212; Opencluster 0.0.1 documentation</title>
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="opencluster" href="modules.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="section" id="opencluster-package">
+<h1>opencluster package<a class="headerlink" href="#opencluster-package" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Permalink to this headline">¶</a></h2>
+</div>
+<div class="section" id="module-opencluster.opencluster">
+<span id="opencluster-opencluster-module"></span><h2>opencluster.opencluster module<a class="headerlink" href="#module-opencluster.opencluster" title="Permalink to this headline">¶</a></h2>
+<p>Package for membership probability calculation from remote or local data.</p>
+<dl class="py class">
+<dt id="opencluster.opencluster.OCTable">
+<em class="property">class </em><code class="sig-prename descclassname">opencluster.opencluster.</code><code class="sig-name descname">OCTable</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">table</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.OCTable" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Class that contains data offers fit methods.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Variables</dt>
+<dd class="field-odd"><p><strong>table</strong> (<em>astropy.table.table</em>) – </p>
+</dd>
+</dl>
+<dl class="py method">
+<dt id="opencluster.opencluster.OCTable.fit_plx">
+<code class="sig-name descname">fit_plx</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">**</span><span class="n">kwargs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.OCTable.fit_plx" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="opencluster.opencluster.OCTable.fit_pm">
+<code class="sig-name descname">fit_pm</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">**</span><span class="n">kwargs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.OCTable.fit_pm" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt id="opencluster.opencluster.Query">
+<em class="property">class </em><code class="sig-prename descclassname">opencluster.opencluster.</code><code class="sig-name descname">Query</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">table</span><span class="o">=</span><span class="default_value">'gaiadr2.gaia_source'</span></em>, <em class="sig-param"><span class="n">column_filters</span><span class="o">=</span><span class="default_value">NOTHING</span></em>, <em class="sig-param"><span class="n">row_limit</span><span class="o">=</span><span class="default_value">- 1</span></em>, <em class="sig-param"><span class="n">radius</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">coords</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">ra_name</span><span class="o">=</span><span class="default_value">'ra'</span></em>, <em class="sig-param"><span class="n">dec_name</span><span class="o">=</span><span class="default_value">'dec'</span></em>, <em class="sig-param"><span class="n">columns</span><span class="o">=</span><span class="default_value">'*'</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.Query" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Query class to retrieve data from remote gaia catalogues.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Variables</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>table</strong> (<em>str</em><em>, </em><em>optional</em>) – Name of the Gaia catalogues table.
+(default is astroquery.gaia.Gaia.MAIN_GAIA_TABLE)</p></li>
+<li><p><strong>ra_name</strong> (<em>str</em><em>, </em><em>optional</em>) – Name of the column of right ascension column in the selected table.
+(default is astroquery.gaia.Gaia.MAIN_GAIA_TABLE_RA)</p></li>
+<li><p><strong>dec_name</strong> (<em>str</em><em>, </em><em>optional</em>) – Name of the declination column in the selected table.
+(default is astroquery.gaia.Gaia.MAIN_GAIA_TABLE_DEC)</p></li>
+<li><p><strong>columns</strong> (<em>str</em><em> or </em><em>list of str</em>) – If str, must be ‘*’, indicating all columns. If list of str,
+must be list of valid column names.</p></li>
+<li><p><strong>column_filters</strong> (<em>dict</em><em>, </em><em>optional</em>) – Dictionary of filters: {‘column_name’ : ‘column_filter’}
+column_name: str
+Valid column in the selected table
+column_filter: str
+Must start with ‘&lt;’, ‘&gt;’, ‘&lt;=’, ‘&gt;=’ and end with a numeric value.</p></li>
+<li><p><strong>row_limit</strong> (<em>int</em><em>, </em><em>optional</em>) – Limit of rows to retrieve from the remote table.
+(default is -1, meaning all found rows)</p></li>
+<li><p><strong>radius</strong> (<em>u.quantity.Quantity</em>) – Radius of the cone search.</p></li>
+<li><p><strong>coords</strong> (<em>astropy.coordinates.SkyCoord</em>) – Coordinates of the center of the cone search.</p></li>
+<li><p><a class="reference internal" href="#opencluster.opencluster.Query.QUERY_TEMPLATE" title="opencluster.opencluster.Query.QUERY_TEMPLATE"><strong>QUERY_TEMPLATE</strong></a> (<em>multiline str template used for the query</em>) – </p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py attribute">
+<dt id="opencluster.opencluster.Query.QUERY_TEMPLATE">
+<code class="sig-name descname">QUERY_TEMPLATE</code><em class="property"> = &quot;\n    SELECT\n    {row_limit}\n    {columns},\n    DISTANCE(\n        POINT('ICRS', {ra_column}, {dec_column}),\n        POINT('ICRS', {ra}, {dec})\n    ) AS dist\n    FROM\n    {table_name}\n    WHERE\n    1 = CONTAINS(\n        POINT('ICRS', {ra_column}, {dec_column}),\n        CIRCLE('ICRS', {ra}, {dec}, {radius}))\n    &quot;</em><a class="headerlink" href="#opencluster.opencluster.Query.QUERY_TEMPLATE" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="opencluster.opencluster.Query.build">
+<code class="sig-name descname">build</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.Query.build" title="Permalink to this definition">¶</a></dt>
+<dd><p>Build and perform query.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns</dt>
+<dd class="field-odd"><p><strong>query</strong></p>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p>string with built query.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="opencluster.opencluster.Query.from_table">
+<code class="sig-name descname">from_table</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">**</span><span class="n">kwargs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.Query.from_table" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="opencluster.opencluster.Query.get">
+<code class="sig-name descname">get</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">**</span><span class="n">kwargs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.Query.get" title="Permalink to this definition">¶</a></dt>
+<dd><p>Build and performe query.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>Parameters that are passed through **kwargs to</strong></p></li>
+<li><p><strong>astroquery.gaia.Gaia.launch_job_async</strong></p></li>
+<li><p><strong>For example</strong></p></li>
+<li><p><strong>dump_to_file</strong> (<em>bool</em>) – If True, results will be stored in file
+(default is False).</p></li>
+<li><p><strong>output_file</strong> (<em>str</em>) – Name of the output file</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>octable</strong> – Instance with query results,
+None if dump_to_file is True</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference internal" href="#opencluster.opencluster.OCTable" title="opencluster.opencluster.OCTable">opencluster.OCTable</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="opencluster.opencluster.Query.select">
+<code class="sig-name descname">select</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">columns</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.Query.select" title="Permalink to this definition">¶</a></dt>
+<dd><p>Select table columns to be retrieved.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>columns</strong> (<em>str or list of str</em>) – If str, must be ‘*’, indicating all columns
+If list of str, must be list of valid column names.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>query</strong></p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>Query class instance</p>
+</dd>
+<dt class="field-even">Raises</dt>
+<dd class="field-even"><p><strong>ValueError if an attribute does not match type.</strong> – </p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="opencluster.opencluster.Query.top">
+<code class="sig-name descname">top</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">row_limit</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.Query.top" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set row limit for the query.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Variables</dt>
+<dd class="field-odd"><p><strong>row_limit</strong> (<em>int</em><em>, </em><em>optional</em>) – Limit of rows to retrieve from the remote table.
+(default is -1, meaning all found rows)</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>query</strong></p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>Query class instance</p>
+</dd>
+<dt class="field-even">Raises</dt>
+<dd class="field-even"><p><strong>ValueError if an attribute does not match type.</strong> – </p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="opencluster.opencluster.Query.where">
+<code class="sig-name descname">where</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">column_filters</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.Query.where" title="Permalink to this definition">¶</a></dt>
+<dd><p>Add filters or conditions to the query.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>column_filters</strong> (<em>dict, optional</em>) – Dictionary of filters: {‘column_name’ : ‘column_filter’}
+column_name: str
+Valid column in the selected table
+column_filter: str
+Must start with ‘&lt;’, ‘&gt;’, ‘&lt;=’, ‘&gt;=’and end with a
+numeric value.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>query</strong></p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>Query class instance</p>
+</dd>
+<dt class="field-even">Raises</dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError if an attribute does not match type.</strong> – </p></li>
+<li><p><strong>KeyError if columns is not '*' and filter has invalid column.</strong> – </p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt id="opencluster.opencluster.checkargs">
+<code class="sig-prename descclassname">opencluster.opencluster.</code><code class="sig-name descname">checkargs</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">function</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.checkargs" title="Permalink to this definition">¶</a></dt>
+<dd><p>Check arguments match their annotated type.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>function</strong> (<em>function</em>)</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p></p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>function result</p>
+</dd>
+<dt class="field-even">Raises</dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>TypeError</strong> – </p></li>
+<li><p><strong>If argument does not match annotated type.</strong> – </p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="opencluster.opencluster.list_remotes">
+<code class="sig-prename descclassname">opencluster.opencluster.</code><code class="sig-name descname">list_remotes</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.list_remotes" title="Permalink to this definition">¶</a></dt>
+<dd><p>List available tables in Gaia catalogues.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns</dt>
+<dd class="field-odd"><p><strong>tables</strong> – Available tables names</p>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p>list of str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="opencluster.opencluster.load_file">
+<code class="sig-prename descclassname">opencluster.opencluster.</code><code class="sig-name descname">load_file</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span><span class="n">args</span></em>, <em class="sig-param"><span class="o">**</span><span class="n">kwargs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.load_file" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="opencluster.opencluster.load_remote">
+<code class="sig-prename descclassname">opencluster.opencluster.</code><code class="sig-name descname">load_remote</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span><span class="n">args</span></em>, <em class="sig-param"><span class="o">**</span><span class="n">kwargs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.load_remote" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="opencluster.opencluster.lognegexp_normal">
+<code class="sig-prename descclassname">opencluster.opencluster.</code><code class="sig-name descname">lognegexp_normal</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">par</span></em>, <em class="sig-param"><span class="n">x</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.lognegexp_normal" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculate f(x) where f is parallax approximation function.</p>
+<p>It models the field as the sum of log and negative exp,
+and the cluster as a gaussian.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>par</strong> (<em>array of float</em>) – Must contain in order: k, a, h, r, kc, u, s</p></li>
+<li><p><strong>x</strong> (<em>float</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>y</strong> – y = f(x) =
+k.log(x/a) + h.e^(-x/r) + (kc/sqrt(2.pi.s)).e^(-((x-u)^2)/2.s^2)</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="opencluster.opencluster.normalnegexp_normal">
+<code class="sig-prename descclassname">opencluster.opencluster.</code><code class="sig-name descname">normalnegexp_normal</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.normalnegexp_normal" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculate f(x) where f is parallax approximation function.</p>
+<p>Alternative that uses piecewise defined function
+with normal|negative exponential for field, normal for cluster.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="opencluster.opencluster.query_region">
+<code class="sig-prename descclassname">opencluster.opencluster.</code><code class="sig-name descname">query_region</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span></em>, <em class="sig-param"><span class="n">ra</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">dec</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">name</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">radius</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.query_region" title="Permalink to this definition">¶</a></dt>
+<dd><p>Make a cone search type query for retrieving data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ra</strong> (<em>int, float, optional</em>) – Right ascention of the center of the cone search.</p></li>
+<li><p><strong>dec</strong> (<em>int, float, optional</em>) – Declination of the center of the cone search.</p></li>
+<li><p><strong>name</strong> (<em>str, optional</em>) – Name of the Simbad identifier to set the center of the cone search.</p></li>
+<li><p><strong>radius</strong> (<em>astropy.units.quantity.Quantity</em>) – Radius of the cone search.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><strong>query</strong></p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>Query class instance</p>
+</dd>
+<dt class="field-even">Raises</dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>ValueError if an attribute does not match type</strong><strong>, or </strong><strong>if</strong> – </p></li>
+<li><p><strong>both name and ra &amp; dec are provided.</strong> – </p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="opencluster.opencluster.remote_info">
+<code class="sig-prename descclassname">opencluster.opencluster.</code><code class="sig-name descname">remote_info</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span><span class="n">args</span></em>, <em class="sig-param"><span class="o">**</span><span class="n">kwargs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.remote_info" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="opencluster.opencluster.simbad_search">
+<code class="sig-prename descclassname">opencluster.opencluster.</code><code class="sig-name descname">simbad_search</code><span class="sig-paren">(</span><em class="sig-param"><span class="o">*</span><span class="n">args</span></em>, <em class="sig-param"><span class="o">**</span><span class="n">kwargs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.simbad_search" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="opencluster.opencluster.two_normal">
+<code class="sig-prename descclassname">opencluster.opencluster.</code><code class="sig-name descname">two_normal</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">par</span></em>, <em class="sig-param"><span class="n">x</span></em><span class="sig-paren">)</span><a class="headerlink" href="#opencluster.opencluster.two_normal" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculate f(x) where f is proper motion approximation function.</p>
+<p>Uses 2 normal distributions, one for the field and one for the cluster.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="module-opencluster">
+<span id="module-contents"></span><h2>Module contents<a class="headerlink" href="#module-opencluster" title="Permalink to this headline">¶</a></h2>
+<p>Opencluster.</p>
+<p>Package for membership probability calculation for star clusters.</p>
+</div>
+</div>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">Opencluster</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">opencluster</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">opencluster package</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">opencluster package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#submodules">Submodules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#module-opencluster.opencluster">opencluster.opencluster module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#module-opencluster">Module contents</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+  <li><a href="modules.html">opencluster</a><ul>
+      <li>Previous: <a href="modules.html" title="previous chapter">opencluster</a></li>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2020, Simon Gonzalez, Antonio Alejo.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 3.2.1</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="_sources/opencluster.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

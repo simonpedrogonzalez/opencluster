@@ -26,10 +26,10 @@ setup(
     ],
     install_requires=[
         "numpy",
-        "matplotlib",
+        # "matplotlib",
         "scipy",
-        "Cython",
-        "scikit-learn",
+        # "Cython",
+        # "scikit-learn",
         "astropy",
         "astroquery",
         "pandas",
