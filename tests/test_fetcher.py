@@ -1,3 +1,4 @@
+"""Test data fetcher module"""
 # <Opencluster, a package for open star cluster probabilities calculations>
 # Copyright (C) 2020  González Simón Pedro
 
@@ -13,7 +14,7 @@
 
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
+# pylint: disable=missing-docstring
 
 import os
 
@@ -21,7 +22,7 @@ import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astropy.utils.diff import report_diff_values
 
-from opencluster.opencluster import (
+from opencluster.fetcher import (
     list_remotes,
     load_file,
     load_remote,
@@ -32,7 +33,7 @@ from opencluster.opencluster import (
 import pytest
 
 
-class TestDataRetriever:
+class TestDataFetcher:
     def test_simbad_search(self):
         assert simbad_search("ic2395").to_string("hmsdms") == SkyCoord(
             ra=130.62916667, dec=-48.1, frame="icrs", unit="deg"

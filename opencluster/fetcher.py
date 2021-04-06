@@ -41,8 +41,6 @@ from attr import attrib, attrs, validators
 
 import numpy as np
 
-import scipy.optimize as opt
-
 
 def checkargs(function):
     """Check arguments match their annotated type.
@@ -81,12 +79,12 @@ def checkargs(function):
 
 
 @checkargs
-def simbad_search(id: str):
+def simbad_search(identifier: str):
     """Search an identifier in Simbad catalogues.
 
     Parameters
     ----------
-    id : str
+    identifier : str
 
     Returns
     -------
@@ -98,7 +96,7 @@ def simbad_search(id: str):
     Identifier not found
         If the identifier has not been found in Simbad Catalogues.
     """
-    result = Simbad.query_object(id)
+    result = Simbad.query_object(identifier)
 
     if result is None:
         warnings.warn("Identifier not found.")
@@ -259,8 +257,10 @@ class Query:
         ------
         ValueError if an attribute does not match type.
         """
-        self.ra_name = ra_name
-        self.dec_name = dec_name
+        if ra_name:
+            self.ra_name = ra_name
+        if dec_name:
+            self.dec_name = dec_name
         self.table = table
         return self
 
@@ -277,8 +277,8 @@ class Query:
             columns = "*"
 
         if self.radius is not None and self.coords is not None:
-            raHours, dec = coord_to_radec(self.coords)
-            ra = raHours * 15.0
+            ra_hours, dec = coord_to_radec(self.coords)
+            ra = ra_hours * 15.0
 
         row_limit = f"TOP {self.row_limit}" if self.row_limit > 0 else ""
 
@@ -351,6 +351,7 @@ class Query:
             None if dump_to_file is True
         """
         query = self.build()
+
         job = Gaia.launch_job_async(query=query, **kwargs)
         if not kwargs.get("dump_to_file"):
             table = job.get_results()
@@ -396,27 +397,40 @@ def query_region(*, ra=None, dec=None, name=None, radius):
             raise ValueError("ra and dec must be numeric")
         else:
             coord = SkyCoord(ra, dec, unit=(u.degree, u.degree), frame="icrs")
-    radiusDeg = radius_to_unit(radius, unit="deg")
-    query = Query(radius=radiusDeg, coords=coord)
+    radius_deg = radius_to_unit(radius, unit="deg")
+    query = Query(radius=radius_deg, coords=coord)
     return query
 
 
-def list_remotes():
+def list_remotes(only_names: bool = True, pattern: str = None, **kwargs):
     """List available tables in Gaia catalogues.
+
+    Parameters
+    ----------
+    only_names : bool, optional, default is True
+        Return only table names.
+    pattern: str, optional, return only results
+        that match pattern. Works only if only_names
+        is True
 
     Returns
     -------
-    tables : list of str
+    tables : list of str if only_names=True
         Available tables names
+
+    tables: vot table if only_names=False
     """
-    available_tables = Gaia.load_tables()
-    names = []
-    for table in available_tables:
-        name = table.get_qualified_name()
-        index = name.index(".") + 1
-        name = name[index:]
-        names.append(name)
-    return names
+    available_tables = Gaia.load_tables(**kwargs)
+    if only_names:
+        names = []
+        for table in available_tables:
+            name = table.get_qualified_name()
+            index = name.index(".") + 1
+            name = name[index:]
+            if not pattern or pattern in name:
+                names.append(name)
+        return names
+    return available_tables
 
 
 @checkargs
@@ -521,57 +535,6 @@ def load_remote(
         return OCTable(result)
 
 
-def lognegexp_normal(par, x):
-    """Calculate f(x) where f is parallax approximation function.
-
-    It models the field as the sum of log and negative exp,
-    and the cluster as a gaussian.
-
-    Parameters
-    ----------
-        par : array of float
-            Must contain in order: k, a, h, r, kc, u, s
-        x : float
-
-    Returns
-    -------
-    y : float
-        y = f(x) =
-        k.log(x/a) + h.e^(-x/r) + (kc/sqrt(2.pi.s)).e^(-((x-u)^2)/2.s^2)
-    """
-    return (
-        (par[0] * np.log(x / par[1]))
-        + (par[2] * np.exp(-x / par[3]))
-        + (par[4] / np.sqrt(2 * np.pi * par[6]))
-        * np.exp(-((x - par[5]) ** 2) / (2 * (par[6] ** 2)))
-    )
-
-
-def normalnegexp_normal():
-    """Calculate f(x) where f is parallax approximation function.
-
-    Alternative that uses piecewise defined function
-    with normal|negative exponential for field, normal for cluster.
-    """
-    ...
-
-
-def two_normal(par, x):
-    """Calculate f(x) where f is proper motion approximation function.
-
-    Uses 2 normal distributions, one for the field and one for the cluster.
-    """
-    return (
-        par[4]
-        / np.sqrt(2.0 * np.pi * par[1])
-        * np.exp(-((x - par[0]) ** 2 / (2 * par[1] ** 2)))
-    ) + (
-        par[5]
-        / np.sqrt(2.0 * np.pi * par[3])
-        * np.exp(-((x - par[2]) ** 2 / (2 * par[3] ** 2)))
-    )
-
-
 @attrs(frozen=True)
 class OCTable:
     """Class that contains data offers fit methods.
@@ -583,16 +546,16 @@ class OCTable:
 
     table = attrib(validator=validators.instance_of(Table))
 
-    def __getattr__(self, a):
+    def __getattr__(self, attr):
         """Get a named attribute from an table; getattr(x, 'y') is equivalent to x.y.
 
         All astropy.table.table attributs are can be accessed.
         """
-        return getattr(self.table, a)
+        return getattr(self.table, attr)
 
-    def __getitem__(self, a):
+    def __getitem__(self, attr):
         """Get item from contained astropy.table.table."""
-        return self.table[a]
+        return self.table[attr]
 
     def __iter__(self):
         """Get iterable from contained astropy.table.table."""
@@ -602,311 +565,12 @@ class OCTable:
         """Get table length."""
         return len(self.table)
 
-    @checkargs
-    def fit_plx(
-        self,
-        initial_params,
-        plx_col: str = "parallax",
-        lower_lim: (float, int) = None,
-        upper_lim: (float, int) = None,
-        function: str = "lognegexp_normal",
-        bins: (int, str) = "fd",
-        ftol: float = 1.0e-12,
-        gtol: float = 1.0e-12,
-        xtol: float = 1.0e-12,
-        arenou_criterion: bool = True,
-        bp_rp_col: str = "bp_rp",
-        bp_rp_excess_factor_col: str = "phot_bp_rp_excess_factor",
-        **kwargs,
-    ):
-        """Fits a custom function to the parallax histogram.
-
-        It uses scipy least-squeares Levemberg-Marquardt algorithm.
-
-        Parameters
-        ----------
-        function : function
-            Fitting function used. Default is "lognegexp", a 7
-            parameter function:
-            parameters = [k, a, h, r, kc, u, s]
-            y = f(x) =
-            k.log(x/a) + h.e^(-x/r) + (kc/sqrt(2.pi.s)).e^(-((x-u)^2)/2.s^2)
-        initial_params : list of float
-            Initial parameters to star the least squares process.
-        plx_col : str, optional
-            Name of the parallax column in the dataset (default 'parallax').
-        lower_lim: float, int, optional
-            Lower parallax limit to take into account.
-        upper_lim: float, int, optional
-            Upper parallax limit to take into account.
-        bins: int, str
-            Number of bins to be used or str containing numpy.histogram
-            method for calculating number of bins (default is 'fd').
-        ftol: float
-            Tolerance for termination by the change of the cost function
-            in least squeares method. Default is 1.0e-12.
-        gtol: float
-            Tolerance for termination by the norm of the gradient
-            in least squares method. Default is 1.0e-12.
-        xtol: float
-            Tolerance for termination by the change of the independent
-            variables in least squares method. Default is 1.0e-12.
-        arenou_criterion: bool
-            Indicates if arenou criterion is used to filter the data
-            before fitting.
-            Default is True.
-            Arenou criterion = True if:
-            1 + 0.015(BP-RP)^2 < E <1.3 + 0.006(BP-RP)^2
-            where E is photometric BP-RP excess factor.
-        bp_rp_col: str
-            Name of BP-RP column in the dataset. Default is 'bp_rp'.
-        bp_rp_excess_factor_col: str
-            Name of the BP-RP excess factor column in the dataset.
-            Default is 'phot_bp_rp_excess_factor'.
+    def __dir__(self):
+        """Get list of attribute names.
 
         Returns
         -------
-        result: scipy.optimize.OptimizeResult with least squares result
-        and two more attributes:
-            histogram, bin_edges: result of numpy.histogram
-            applied to parallax data.
-
-        Raises
-        ------
-        TypeError
-        If argument does not match annotated type.
+        list of strings
+            List of attribute names
         """
-        # get pandas dataframe from VOTable
-        df = self.table.to_pandas()
-
-        # select columns that are going to be used
-        columns = [plx_col]
-        if arenou_criterion:
-            columns += [bp_rp_col, bp_rp_excess_factor_col]
-        df = df[columns]
-
-        # discard nans and infs
-        indices_to_keep = ~df.isin([np.nan, np.inf, -np.inf]).any("columns")
-        df = df[indices_to_keep]
-
-        # apply arenou criterion
-        if arenou_criterion:
-            df = df.loc[
-                (1 + 0.015 * df[bp_rp_col] ** 2 < df[bp_rp_excess_factor_col])
-                & (
-                    df[bp_rp_excess_factor_col]
-                    < 1.3 + 0.06 * df[bp_rp_col] ** 2
-                )
-            ]
-
-        # apply parallax limits filter
-        if lower_lim is not None:
-            df = df.loc[(df[plx_col] >= lower_lim)]
-        else:
-            lower_lim = df[plx_col].min()
-        if upper_lim is not None:
-            df = df.loc[(df[plx_col] <= upper_lim)]
-        else:
-            upper_lim = df[plx_col].max()
-
-        plx = df[plx_col].to_numpy()
-
-        his, bin_edges = np.histogram(
-            plx, bins=30, density=True, range=(lower_lim, upper_lim)
-        )
-        bin_width = bin_edges[1] - bin_edges[0]
-        bin_center = bin_edges - bin_width / 2
-        # freq = his * bin_width
-        his = his / np.sum(his)
-
-        solution = opt.least_squares(
-            fun=lambda params, x, y: lognegexp_normal(params, x) - y,
-            x0=np.array(initial_params),
-            method="lm",
-            args=(bin_center[1:], his),
-            ftol=ftol,
-            gtol=gtol,
-            xtol=xtol,
-        )
-
-        solution["histogram"] = his
-        solution["bin_edges"] = bin_edges
-
-        return solution
-
-    @checkargs
-    def fit_pm(
-        self,
-        initial_params_ra,
-        initial_params_dec,
-        pmra_col: str = "pmra",
-        pmdec_col: str = "pmdec",
-        plx_col: str = "parallax",
-        bp_rp_excess_factor_col: str = "phot_bp_rp_excess_factor",
-        bp_rp_col: str = "bp_rp",
-        function: str = "two_normal",
-        bins_pmra: (int, str) = "fd",
-        bins_pmdec: (int, str) = "fd",
-        ftol: float = 1.0e-12,
-        gtol: float = 1.0e-12,
-        xtol: float = 1.0e-12,
-        plx_lower_lim: (float, int) = None,
-        plx_upper_lim: (float, int) = None,
-        arenou_criterion: bool = True,
-        **kwargs,
-    ):
-        """Fits customs functions to pmra and pmdex histograms.
-
-        It uses scipy least-squeares Levemberg-Marquardt algorithm.
-
-        Parameters
-        ----------
-        function : function
-            Fitting function used. Default is "two_normal", a 6 parameter
-            function: parameters = [u1, s1, u2, s2, k1, k2]
-            y = f(x) =
-            k1/sqrt(2.pi.s1)).e^(-((x-u1)^2)/2.s1^2) +
-            k2/sqrt(2.pi.s2)).e^(-((x-u2)^2)/2.s2^2)
-        initial_params_pmra : list of float
-            Initial parameters to star the least squares process.
-            Used to fit pmra.
-        initial_params_pmdec : list of float
-            Initial parameters to star the least squares process.
-            Used to fit pmdec.
-        plx_col : str, optional
-            Name of the parallax column in the dataset
-            (default 'parallax').
-        pmra_col : str, optional
-            Name of the pmra column in the dataset (default 'pmra').
-        pmdec_col : str, optional
-            Name of the pmdec column in the dataset (default 'pmdec').
-        plx_lower_lim: float, int, optional
-            Lower parallax limit to take into account.
-        plx_upper_lim: float, int, optional
-            Upper parallax limit to take into account.
-        bins_pmra: int, str
-            Number of bins to be used or str containing numpy.histogram
-            method for calculating number of bins (default is 'fd').
-            Used for pmra histogram.
-        bins_pmdec: int, str
-            Number of bins to be used or str containing numpy.histogram
-            method for calculating number of bins (default is 'fd').
-            Used for pmdec histogram.
-        ftol: float
-            Tolerance for termination by the change of the cost function
-            in least squeares method. Default is 1.0e-12.
-        gtol: float
-            Tolerance for termination by the norm of the gradient in
-            least squares method. Default is 1.0e-12.
-        xtol: float
-            Tolerance for termination by the change of the independent
-            variables in least squares method. Default is 1.0e-12.
-        arenou_criterion: bool
-            Indicates if arenou criterion is used to filter the data
-            before fitting. Default is True.
-            Arenou criterion = True if:
-            1 + 0.015(BP-RP)^2 < E <1.3 + 0.006(BP-RP)^2
-            where E is photometric BP-RP excess factor.
-        bp_rp_col: str
-            Name of BP-RP column in the dataset. Default is 'bp_rp'.
-        bp_rp_excess_factor_col: str
-            Name of the BP-RP excess factor column in the dataset.
-            Default is 'phot_bp_rp_excess_factor'.
-
-        Returns
-        -------
-        result: dict with two keys: solution_pmra and solution_pmdec.
-        Each solution is a scipy.optimize.OptimizeResult with least
-        squares result
-        and two more attributes:
-            histogram, bin_edges: result of numpy.histogram applied
-            to parallax data.
-
-        Raises
-        ------
-        TypeError
-        If argument does not match annotated type.
-        """
-        df = self.table.to_pandas()
-
-        columns = [
-            pmra_col,
-            pmdec_col,
-            plx_col,
-            bp_rp_col,
-            bp_rp_excess_factor_col,
-        ]
-        df = df[columns]
-
-        indices_to_keep = ~df.isin([np.nan, np.inf, -np.inf]).any("columns")
-        df = df[indices_to_keep]
-
-        # Filtro en magnitud
-
-        df = df.loc[df[bp_rp_col] < 14]
-
-        # Filtro fotométrico
-
-        df = df.loc[
-            (1 + 0.015 * df[bp_rp_col] ** 2 < df[bp_rp_excess_factor_col])
-            & (df[bp_rp_excess_factor_col] < 1.3 + 0.06 * df[bp_rp_col] ** 2)
-        ]
-
-        # Filtro de paralaje
-
-        if plx_lower_lim is not None:
-            df = df.loc[(df[plx_col] >= plx_lower_lim)]
-        else:
-            plx_lower_lim = df[plx_col].min()
-        if plx_upper_lim is not None:
-            df = df.loc[(df[plx_col] <= plx_upper_lim)]
-        else:
-            plx_upper_lim = df[plx_col].max()
-
-        pmra = df[pmra_col].to_numpy()
-        pmdec = df[pmdec_col].to_numpy()
-
-        # Ajuste en pmra
-
-        his, bin_edges_ra = np.histogram(pmra, bins=bins_pmra, density=True)
-
-        bin_width_ra = bin_edges_ra[1] - bin_edges_ra[0]
-        bin_center_ra = bin_edges_ra - bin_width_ra / 2
-        # freq_ra = his * bin_width_ra
-        his = his / np.sum(his)
-        solution_ra = opt.least_squares(
-            fun=lambda params, x, y: two_normal(params, x) - y,
-            x0=np.array(initial_params_ra),
-            method="lm",
-            args=(bin_center_ra[1:], his),
-            ftol=ftol,
-            gtol=gtol,
-            xtol=xtol,
-        )
-
-        solution_ra["histogram"] = his
-        solution_ra["bin_edges"] = bin_edges_ra
-
-        # Ajuste en pmdec
-
-        his, bin_edges_dec = np.histogram(pmdec, bins=bins_pmdec, density=True)
-
-        bin_width_dec = bin_edges_dec[1] - bin_edges_dec[0]
-        bin_center_dec = bin_edges_dec - bin_width_dec / 2
-        # freq_dec = his * bin_width_dec
-        his = his / np.sum(his)
-
-        solution_dec = opt.least_squares(
-            fun=lambda params, x, y: two_normal(params, x) - y,
-            x0=np.array(initial_params_dec),
-            method="lm",
-            args=(bin_center_dec[1:], his),
-            ftol=ftol,
-            gtol=gtol,
-            xtol=xtol,
-        )
-
-        solution_dec["histogram"] = his
-        solution_dec["bin_edges"] = bin_center_dec
-
-        return {"solution_pmra": solution_ra, "solution_pmdec": solution_dec}
+        return dir(self.table)
