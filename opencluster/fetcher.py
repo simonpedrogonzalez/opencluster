@@ -30,7 +30,7 @@ import warnings
 
 import astropy.units as u
 from astropy.coordinates import SkyCoord
-from astropy.io.votable import parse
+from astropy.io.votable import from_table, parse, writeto
 from astropy.table.table import Table
 
 from astroquery.gaia import Gaia
@@ -79,37 +79,53 @@ def checkargs(function):
 
 
 @checkargs
-def simbad_search(identifier: str):
+def simbad_search(identifier: str, fields=['coordinates',
+    'parallax','propermotions','velocity', 'dimensions', 'diameter'], dump_to_file: bool =False,
+    output_file: str=None, **kwargs):
     """Search an identifier in Simbad catalogues.
 
     Parameters
     ----------
     identifier : str
+    fields : list of strings optional, default: ['coordinates',
+    'parallax','propermotions','velocity']
+        Fields to be included in the result.
+    dump_to_file: bool optional, default False
+    output_file: string, optional.
+        Name of the file, default is the object identifier.
 
     Returns
     -------
     coordinates : astropy.coordinates.SkyCoord
         Coordinates of object if found, None otherwise
+    result: votable
+        Full result table
 
     Warns
     ------
     Identifier not found
         If the identifier has not been found in Simbad Catalogues.
     """
-    result = Simbad.query_object(identifier)
+    simbad = Simbad()
+    for f in fields:
+        simbad.add_votable_fields(f)
+    result = simbad.query_object(identifier, **kwargs)
 
     if result is None:
         warnings.warn("Identifier not found.")
         return None
-    ra = (
-        np.array(result["RA"])[0].replace(" ", "h", 1).replace(" ", "m", 1)
-        + "s"
-    )
-    dec = (
-        np.array(result["DEC"])[0].replace(" ", "d", 1).replace(" ", "m", 1)
-        + "s"
-    )
-    return SkyCoord(ra, dec, frame="icrs")
+
+    coord = ' '.join(
+        np.array(simbad.query_object(identifier)[['RA','DEC']])[0]
+        )
+    
+    if dump_to_file:
+        if not output_file:
+            output_file = identifier
+        table = from_table(result)
+        writeto(table=table, file=output_file)
+    
+    return SkyCoord(coord, unit=(u.hourangle, u.deg)), result
 
 
 @attrs
@@ -358,7 +374,7 @@ class Query:
             return table
 
 
-def query_region(*, ra=None, dec=None, name=None, radius):
+def query_region(*, ra=None, dec=None, name=None, coord=None, radius):
     """Make a cone search type query for retrieving data.
 
     Parameters
@@ -371,6 +387,8 @@ def query_region(*, ra=None, dec=None, name=None, radius):
         Name of the Simbad identifier to set the center of the cone search.
     radius : astropy.units.quantity.Quantity
         Radius of the cone search.
+    coord : astropy.coordinates.SkyCoord, optional
+        Coords of center of cone search
 
     Returns
     -------
@@ -383,7 +401,7 @@ def query_region(*, ra=None, dec=None, name=None, radius):
     """
     if not isinstance(radius, u.quantity.Quantity):
         raise ValueError("radious must be astropy.units.quantity.Quantity")
-    if not ((name is not None) ^ (ra is not None and dec is not None)):
+    if not ((name is not None) ^ (ra is not None and dec is not None) ^ (coord is not None)):
         raise ValueError("'name' or 'ra' and 'dec' are required (not both)")
     if name is not None:
         if not isinstance(name, str):
@@ -485,6 +503,7 @@ def load_remote(
     ra=None,
     dec=None,
     name=None,
+    coord=None,
     radius,
     limit=-1,
     **kwargs,
@@ -522,13 +541,12 @@ def load_remote(
         None if dump_to_file is True.
     """
     query = (
-        query_region(name=name, ra=ra, dec=dec, radius=radius)
+        query_region(name=name, ra=ra, dec=dec, coord=coord, radius=radius)
         .from_table(table)
         .select(columns)
         .where(filters)
         .top(limit)
     )
-
     result = query.get(**kwargs)
 
     if not kwargs.get("dump_to_file"):
