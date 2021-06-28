@@ -1,12 +1,12 @@
 # Opencluster
 
-[![Build Status](https://travis-ci.com/simonpedrogonzalez/opencluster.svg?branch=master)](https://travis-ci.com/simonpedrogonzalez/opencluster)
+[![Build Status](https://travis-ci.com/simonpedrogonzalez/opencluster.svg?branch=develop)](https://travis-ci.com/simonpedrogonzalez/opencluster)
 
 load_remote: easy to use wrapper for simple radial search queries, over some of the most commonly used catalogs for coordinates, proper motions, parallax and magnitudes (gaia DR1 & DR2, hipparcos, tychos2, etc from the astroquery Gaia web service).
 ```python
 import astropy.units as u
 
-from opencluster import load_remote
+from opencluster.fetcher import load_remote
 
 octable = load_remote(
             table="gaiadr2.gaia_source",
