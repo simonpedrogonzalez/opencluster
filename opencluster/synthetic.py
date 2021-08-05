@@ -9,8 +9,13 @@ from typing import Optional, Tuple, List, Union
 from attr import attrib, attrs, validators
 import copy
 import math
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import Distance, SkyCoord
 import astropy.units as u
+
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname('opencluster'), '.'))
+from opencluster.fetcher import load_file
 
 np.seterr(over='raise')
 # np.seterr(invalid='raise')
@@ -115,6 +120,18 @@ def uniform_sphere(center:tuple, radius:float, size:int=1):
     y = r * np.sin(theta) * np.sin(phi) + center[1]
     z = r * np.cos(theta) + center[2]
     return np.vstack((x, y, z)).T
+
+def square_region(ra_range, dec_range, n):
+    mins = [ra_range[0], dec_range[0]]
+    maxs = [ra_range[1], dec_range[1]]
+    return np.random.uniform(low=mins, high=maxs, size=(n, 2))
+
+def cone_region(center, radius, n):
+    theta = np.random.uniform(0, 2*np.pi, n)
+    r =  np.random.uniform(0, radius, n) ** .5
+    x = r * np.cos(theta) + center[0]
+    y = r * np.sin(theta) + center[1]
+    return np.vstack((x, y)).T
 
 
 def norm2d(mean, cov, n):
@@ -413,24 +430,27 @@ print('coso') """
 def cartesian_to_polar(coords):
     coords = SkyCoord(
         x=coords[:, 0], y=coords[:, 1], z=coords[:, 2],
-        unit='kpc', representation_type='cartesian', frame='icrs'
+        unit='pc', representation_type='cartesian', frame='icrs'
         )
     coords.representation_type = 'spherical'
     return np.vstack((coords.ra.deg, coords.dec.deg, coords.distance.parallax.mas)).T
     
 def polar_to_cartesian(coords):
     coords = SkyCoord(
-        x=coords[:, 0], y=coords[:, 1], z=coords[:, 2],
-        unit='kpc', representation_type='spherical', frame='icrs'
+        ra=coords[:,0]*u.degree, dec=coords[:,1]*u.degree, distance=Distance(parallax=coords[:,2]*u.mas),
+        representation_type='spherical', frame='icrs'
         )
     coords.representation_type = 'cartesian'
-    return np.vstack((coords.ra.deg, coords.dec.deg, coords.distance.parallax.mas)).T
+    return np.vstack((coords.x.value, coords.y.value, coords.z.value)).T
 
-r = uniform_sphere(center=(0,0,0), radius=1, size=1000)
 
-y = cartesian_to_polar(r)
+data = load_file("/home/simon/repos/opencluster/scripts/data/NGC_2477/NGC_2477_data_2021-05-10_08-02-15")
+data = data[['ra', 'dec', 'parallax']].to_pandas().to_numpy()
+coords = polar_to_cartesian(data)
+c2 = cartesian_to_polar(coords)
+
 """ d = pd.DataFrame(r)
 d.columns = ['x', 'y', 'z']
 sns.pairplot(d) """
-plt.show()
+# plt.show()
 

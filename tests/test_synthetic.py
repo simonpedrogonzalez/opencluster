@@ -1,4 +1,4 @@
-from opencluster.synthetic import EDSD
+from opencluster.synthetic import EDSD, polar_to_cartesian, cartesian_to_polar
 import numpy as np
 import pytest
 
@@ -28,6 +28,23 @@ class TestEDSD:
         assert sample.min() >= max(0, -.15)
         assert sample.max() <= min(3, 4.1)
 
-class TestCrop5DSphere:
-    def test_corp_5d_sphere_params_check(self):
+class TestCoordTransform:
+    def test_coord_transform(self):
+        cartesian = np.random.uniform(low=-16204., high=16204., size=(1000, 3))
+        polar = cartesian_to_polar(cartesian)
+        assert np.allclose(cartesian, polar_to_cartesian(polar))
+
+class TestCrop:
+    def test_draw_3Dcontour(self):
+        # generate gaussian 3d data
+        # draw shape
+        # assert data in sphere
+        # assert at least one point in ellipse border
         return True
+    
+    def test_draw_2Dcontour(self):
+        # generate gaussian 2d data
+        # draw shape (ellipse)
+        # assert data in ellipse
+        # assert at least one point in ellipse border
+        return False
