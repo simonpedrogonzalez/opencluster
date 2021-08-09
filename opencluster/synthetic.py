@@ -1,3 +1,10 @@
+
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname('opencluster'), '.'))
+
+
+from opencluster.fetcher import load_file
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
@@ -5,23 +12,33 @@ import pandas as pd
 from scipy import stats
 from scipy.optimize import curve_fit
 from typing_extensions import TypedDict
-from typing import Optional, Tuple, List, Union
-from attr import attrib, attrs, validators
+from typing import Optional, Tuple, List, Union, Callable
+from attr import attrib, attrs, validators, Factory
 import copy
 import math
 from astropy.coordinates import Distance, SkyCoord
 import astropy.units as u
-
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname('opencluster'), '.'))
-from opencluster.fetcher import load_file
 
 np.seterr(over='raise')
 # np.seterr(invalid='raise')
 # np.seterr(invalid='divide')
 np.random.seed(0)
 
+def cartesian_to_polar(coords):
+    coords = SkyCoord(
+        x=coords[:, 0], y=coords[:, 1], z=coords[:, 2],
+        unit='pc', representation_type='cartesian', frame='icrs'
+    )
+    coords.representation_type = 'spherical'
+    return np.vstack((coords.ra.deg, coords.dec.deg, coords.distance.parallax.mas)).T
+
+def polar_to_cartesian(coords):
+    coords = SkyCoord(
+        ra=coords[:, 0]*u.degree, dec=coords[:, 1]*u.degree, distance=Distance(parallax=coords[:, 2]*u.mas),
+        representation_type='spherical', frame='icrs'
+    )
+    coords.representation_type = 'cartesian'
+    return np.vstack((coords.x.value, coords.y.value, coords.z.value)).T
 
 class EDSD(stats.rv_continuous):
     def _pdf(self, x, wl, w0, wf):
@@ -94,7 +111,8 @@ class EDSD(stats.rv_continuous):
     def rvs(self, wl, w0, wf, size):
         if not self._argcheck(wl, w0, wf):
             raise ValueError('wf must be greater than w0')
-        limits = np.array([max(w0+1e-10, self.a), min(wf-1e-10, self.b)]).astype('float64')
+        limits = np.array(
+            [max(w0+1e-10, self.a), min(wf-1e-10, self.b)]).astype('float64')
         rv_limits = self._cdf(limits, wl, w0, wf)
         sample = np.array([])
         while(sample.shape[0] < size):
@@ -106,12 +124,10 @@ class EDSD(stats.rv_continuous):
             sample = np.concatenate((sample, new_sample), axis=0)
         return sample[:size]
 
-
-def uniform_cube(lows:tuple, highs:tuple, size:int=1):
+def uniform_cube(lows: tuple, highs: tuple, size: int = 1):
     return np.random.uniform(low=lows, high=highs, size=(size, 3))
 
-
-def uniform_sphere(center:tuple, radius:float, size:int=1):
+def uniform_sphere(center: tuple, radius: float, size: int = 1):
     phi = np.random.uniform(0, 2*np.pi, size)
     cos_theta = np.random.uniform(-1, 1, size)
     theta = np.arccos(cos_theta)
@@ -127,16 +143,17 @@ def square_region(ra_range, dec_range, n):
     return np.random.uniform(low=mins, high=maxs, size=(n, 2))
 
 def cone_region(center, radius, n):
-    theta = np.random.uniform(0, 2*np.pi, n)
-    r =  np.random.uniform(0, radius, n) ** .5
+    theta = np.random.uniform(size=n) * 2 * np.pi
+    r = radius * np.random.uniform(size=n) ** .5
     x = r * np.cos(theta) + center[0]
     y = r * np.sin(theta) + center[1]
     return np.vstack((x, y)).T
 
-
 def norm2d(mean, cov, n):
     return np.random.multivariate_normal(mean, cov, n)
 
+def norm3d(mean, cov, n):
+    return np.random.multivariate_normal(mean, cov, n)
 
 def skewnorm(a, loc, scale, n):
     y = stats.skewnorm.rvs(a, loc, scale, n)
@@ -144,10 +161,8 @@ def skewnorm(a, loc, scale, n):
     df.columns = ['plx']
     return df
 
-
 def norm(mean, sigma, n):
     return np.random.normal(mean, sigma, n)
-
 
 def truncated_gumbel(lock, scale, low, high, n):
     rv_limits = (stats.gumbel_r.cdf(low, lock, scale),
@@ -155,8 +170,9 @@ def truncated_gumbel(lock, scale, low, high, n):
     y = np.random.rand(n)*(rv_limits[1] - rv_limits[0]) + rv_limits[0]
     return stats.gumbel_r.ppf(y, lock, scale)
 
+
 # TODO: make faster: instead of line modifying sampling range, line modifies the results directly.
-def plx_error(w0, wl, wf, n, y0=None, x0=None, plx=None):
+""" def plx_error(w0, wl, wf, n, y0=None, x0=None, plx=None):
     n = plx.shape[0]
     err = np.zeros_like(plx)
     table = np.vstack((plx, err)).T
@@ -171,9 +187,7 @@ def plx_error(w0, wl, wf, n, y0=None, x0=None, plx=None):
         table[table[:, 0] <= 0, 1] = err_below_zero
         return table[:, 1]
     else:
-        return EDSD(a=0, b=wf).rvs(wl, w0, wf, size=n)
-
-
+        return EDSD(a=0, b=wf).rvs(wl, w0, wf, size=n) """
 class EDSDParams(TypedDict):
     wl: float
     w0: float
@@ -181,35 +195,31 @@ class EDSDParams(TypedDict):
     a: Optional[float]
     b: Optional[float]
 
-
 class NormParams(TypedDict):
     mean: float
     sigma: float
 
-
-class PlxErrorParams(EDSDParams):
+""" class PlxErrorParams(EDSDParams):
     y0: Optional[float]
     x0: Optional[float]
-
-
 class PlxFieldParams(TypedDict):
-    dist_params: EDSDParams
-    err_params: PlxErrorParams
-
-
+    EDSDParams
 class PlxClusterParams(TypedDict):
     dist_params: NormParams
-    err_params: PlxErrorParams
-
+    err_params: PlxErrorParams """
 
 class Norm2DParams(TypedDict):
     means: Tuple[float, float]
     cov: List[List[float]]
 
 
+class Norm3DParams(TypedDict):
+    means: Tuple[float, float, float]
+    cov: List[List[List[float]]]
+
+
 class PmParams(TypedDict):
-    dist_params: Norm2DParams
-    err_params: Tuple[EDSDParams, EDSDParams]
+    Norm2DParams
 
 
 class ConeRegionParams(TypedDict):
@@ -217,111 +227,105 @@ class ConeRegionParams(TypedDict):
     radius: float
 
 
-class SquareRegionParams(TypedDict):
-    ra_range: Tuple[float, float]
-    dec_range: Tuple[float, float]
+@attrs(auto_attribs=True)
+class Cluster:
+    space_params: Norm3DParams
+    pm_params: Norm2DParams
+    representation_type: str='spherical'
+    star_count: int=200
 
+    def rvs(self):
+        size = self.star_count
+        data = pd.DataFrame()
+        mean = np.reshape(polar_to_cartesian(np.atleast_2d(self.space_params.get('means'))), (3,))
+        xyz = norm3d(
+            mean,
+            self.space_params.get('cov'), size)
+        if self.representation_type == 'spherical':
+            data[['ra', 'dec', 'parallax']] = pd.DataFrame(cartesian_to_polar(xyz))
+        elif self.representation_type == 'cartesian':
+            data[['x', 'y', 'z']] = pd.DataFrame(xyz)
+        else: raise ValueError('Invalid representation type')
+        pm = norm2d(
+            self.pm_params.get('means'),
+            self.pm_params.get('cov'), size)
+        data[['pmra', 'pmdec']] = pd.DataFrame(pm)
+        return data
 
-class FieldParams(TypedDict):
-    plx_params: Optional[PlxFieldParams]
-    pm_params: Optional[PmParams]
-    space_params: Optional[Union[ConeRegionParams, SquareRegionParams]]
 
 @attrs(auto_attribs=True)
 class Field:
+    space_params: ConeRegionParams
+    plx_params: EDSDParams
+    pm_params: Norm2DParams
+    representation_type: str='spherical'
+    star_count: int=int(1e5)
 
-    plx_params: Optional[PlxFieldParams]
-    pm_params: Optional[PmParams]
-    space_params: Optional[Union[ConeRegionParams, SquareRegionParams]]
-
-    def rvs(self, size: float = 1):
+    def rvs(self):
+        size = self.star_count
         data = pd.DataFrame()
-        if self.space_params:
-            if 'center' in self.space_params:
-                ra_dec = cone_region(self.space_params.get(
-                    'center'), self.space_params.get('radius'), size)
-            else:
-                ra_dec = square_region(self.space_params.get(
-                    'ra_range'), self.space_params.grt('dec_range'), size)
-            data[['ra', 'dec']] = pd.DataFrame(ra_dec)
-        if self.pm_params:
-            dist_params = self.pm_params.get('dist_params')
-            pm = norm2d(dist_params.get('means'), dist_params.get('cov'), size)
-            err_params = copy.deepcopy(self.pm_params.get('error_params'))
-            wl, w0, wf = err_params[0].pop('wl'), err_params[0].pop(
-                'w0'), err_params[0].pop('wf')
-            pmra_err = EDSD(**err_params[0]).rvs(wl, w0, wf, size=size)
-            wl, w0, wf = err_params[1].pop('wl'), err_params[1].pop(
-                'w0'), err_params[1].pop('wf')
-            pmdec_err = EDSD(**err_params[1]).rvs(wl, w0, wf, size=size)
-            data[['pmra', 'pmra_error', 'pmdec', 'pmdec_error']] = pd.DataFrame(
-                np.vstack((pm[:, 0], pmra_err, pm[:, 1], pmdec_err)).T
-            )
-        if self.plx_params:
-            dist_params = self.plx_params.get('dist_params')
-            wl, w0, wf = dist_params.pop('wl'), dist_params.pop(
-                'w0'), dist_params.pop('wf')
-            plx = EDSD(**dist_params).rvs(wl, w0, wf, size=size)
-            err_params = copy.deepcopy(self.plx_params.get('error_params'))
-            wl, w0, wf = err_params.pop('wl'), err_params.pop(
-                'w0'), err_params.pop('wf')
-            y0, x0 = err_params.pop('y0', None), err_params.pop('x0', None)
-            if y0:
-                plx_arg = plx
-            else:
-                plx_arg = None
-            plx_err = plx_error(w0, wl, wf, size, y0, x0, plx_arg)
-            data[['parallax', 'parallax_error']] = pd.DataFrame(
-                np.vstack((plx, plx_err)).T)
+        ra_dec = cone_region(
+            self.space_params.get('center'),
+            self.space_params.get('radius'),
+            size)
+        pm = norm2d(
+            self.pm_params.get('means'),
+            self.pm_params.get('cov'),
+            size)
+        data[['pmra', 'pmdec']] = pd.DataFrame(
+                np.vstack((pm[:, 0], pm[:, 1])).T)
+        plx_params = self.plx_params
+        wl, w0, wf = plx_params.pop('wl'), plx_params.pop('w0'), plx_params.pop('wf')
+        plx = EDSD(**plx_params).rvs(wl, w0, wf, size=size)
+        ra_dec_plx = np.vstack((ra_dec[:,0], ra_dec[:,1], plx)).T
+        if self.representation_type == 'cartesian':
+            xyz = polar_to_cartesian(ra_dec_plx)
+            data[['x', 'y', 'z']] = pd.DataFrame(xyz)
+        elif self.representation_type == 'spherical':
+            data[['ra', 'dec', 'parallax']] = pd.DataFrame(ra_dec_plx)
+        else: raise ValueError('Invalid representation type')
         return data
 
+
+def is_from_dist(cdf: Callable, x, *args, **kwargs):
+    return np.isclose(cdf(x, args, kwargs), np.zeros_like(x)) 
 
 @attrs(auto_attribs=True)
-class Cluster:
+class Sample:
+    field: Field
+    clusters: List[Cluster]
 
-    plx_params: Optional[PlxClusterParams]
-    pm_params: Optional[PmParams]
-    space_params: Optional[Norm2DParams]
+    def rvs(self):
+        self.field.representation_type = 'spherical'
+        field_data = self.field.rvs()
+        field_data['label'] = pd.DataFrame(np.zeros(field_data.shape[0], dtype=int))
+        for i in range(len(self.clusters)):
+            label = i+1
+            self.clusters[i].representation_type = 'spherical'
+            cluster_data = self.clusters[i].rvs()
+            idx = (field_data['parallax'] >= cluster_data['parallax'].min()) & (field_data['parallax'] <= cluster_data['parallax'].max())
+            data_columns = ['ra', 'dec', 'pmra', 'pmdec']
+            for column in data_columns:
+                idx = idx & (field_data[column] >= cluster_data[column].min()) & (field_data[column] <= cluster_data[column].max())
+            
+            # TODO: check for every x in field[idx] if 
+            # A: is_from_distribution(polar_to_cartesian(x['ra', 'dec', 'parallax']),
+            #   multivariate_normal(polar_to_cartesian(cluster_center), cluster_cov))
+            # and B: is_from_distribution(x['pmra', 'pmdec'], multivariate_normal(cluster_pm_center, cluster_pm_cov))
+            # then eliminate x from field
 
-    def rvs(self, size: float = 1):
-        data = pd.DataFrame()
-        if self.space_params:
-            ra_dec = norm2d(self.space_params.get('means'),
-                            self.space_params.get('cov'), size)
-            data[['ra', 'dec']] = pd.DataFrame(ra_dec)
-        if self.pm_params:
-            dist_params = self.pm_params.get('dist_params')
-            pm = norm2d(dist_params.get('means'), dist_params.get('cov'), size)
-            err_params = copy.deepcopy(self.pm_params.get('error_params'))
-            wl, w0, wf = err_params[0].pop('wl'), err_params[0].pop(
-                'w0'), err_params[0].pop('wf')
-            pmra_err = EDSD(**err_params[0]).rvs(wl, w0, wf, size=size)
-            wl, w0, wf = err_params[1].pop('wl'), err_params[1].pop(
-                'w0'), err_params[1].pop('wf')
-            pmdec_err = EDSD(**err_params[1]).rvs(wl, w0, wf, size=size)
-            data[['pmra', 'pmra_error', 'pmdec', 'pmdec_error']] = pd.DataFrame(
-                np.vstack((pm[:, 0], pmra_err, pm[:, 1], pmdec_err)).T
-            )
-        if self.plx_params:
-            dist_params = self.plx_params.get('dist_params')
-            plx = norm(dist_params.get('mean'), dist_params.get('sigma'), size)
-            err_params = copy.deepcopy(self.plx_params.get('error_params'))
-            wl, w0, wf = err_params.pop('wl'), err_params.pop(
-                'w0'), err_params.pop('wf')
-            y0, x0 = err_params.pop('y0', None), err_params.pop('x0', None)
-            if y0:
-                plx_arg = plx
-            else:
-                plx_arg = None
-            plx_err = plx_error(w0, wl, wf, size, y0, x0, plx_arg)
-            data[['parallax', 'parallax_error']] = pd.DataFrame(
-                np.vstack((plx, plx_err)).T)
-        return data
+            field_data.drop(field_data[idx].index, inplace=True)
+            cluster_data['label'] = pd.DataFrame(np.ones(cluster_data.shape[0], dtype=int)*label)
+            field_data = pd.concat([field_data, cluster_data], axis=0)
 
+        return field_data
+                
 
-""" @attrs(auto_attribs=True)
-class SkySample:
-    field_params: """
+        
+def is_inside_circle(center, radius, data):
+    dx = np.abs(data[:,0]-center[0])
+    dy = np.abs(data[:,1]-center[1])
+    return (dx < radius) & (dy < radius) & ((dx + dy <= radius) | (dx**2 + dy**2 <= radius**2))
 # radec
 # df = square_region((118, 123), (-25, -30), int(4e5))
 # df = cone_region((120.5, -27.5), 5, int(4e5))
@@ -375,82 +379,48 @@ plt.show() """
 """ plx_error_params = {'w0': -.15, 'wl': 1.1, 'wf': 4.1, 'y0': .15, 'x0': .05}
 pm_error_params = (
     {'w0': -.15, 'wl': 1.1, 'wf': 3.4, 'a': 0, 'b': 3.4},
-    {'w0': -.15, 'wl': 1.1, 'wf': 3.4, 'a': 0, 'b': 3.4})
+    {'w0': -.15, 'wl': 1.1, 'wf': 3.4, 'a': 0, 'b': 3.4}) """
 
+rt = 'spherical'
 field = Field(
-    plx_params={
-        'dist_params': {'w0': -.1, 'wl': 1.2, 'wf': 5},
-        'error_params': plx_error_params
-    },
-    pm_params={
-        'dist_params': {'means': (0., 0.), 'cov': [[10, -10], [-50, 10]]},
-        'error_params': pm_error_params
-    },
-    space_params={'center': (120.5, -27.5), 'radius': 5}
-)
-field_data = field.rvs(int(1e4))
-field_data['tag'] = pd.DataFrame(np.zeros((int(1e4),)))
+    plx_params={'w0': 1, 'wl': 2, 'wf': 12},
+    pm_params={'means': (0., 0.), 'cov': [[10, -10], [-50, 10]]},
+    space_params={'center': (120.5, -27.5), 'radius': 5},
+    representation_type=rt,
+    star_count=int(1e4)
+)# .rvs()
+# field_data['tag'] = pd.DataFrame(np.zeros((int(1e3),)))
 
 cluster = Cluster(
-    plx_params={
-        'dist_params': {'mean': .7, 'sigma': .05},
-        'error_params': plx_error_params
-    },
-    pm_params={
-        'dist_params': {'means': (-2.4, 2), 'cov': [[.3, 0], [0, .3]]},
-        'error_params': pm_error_params
-    },
-    space_params={
-        'means': (119.5, -26.5),
-        'cov': [[.08, 0], [0, .08]]}
-) """
+    pm_params={'means': (-2.4, 2), 'cov': [[.3, 0], [0, .3]]},
+    space_params={'means':(121.5, -26.5, 3), 'cov':[[.8, 0, 0], [0, .8, 0], [0, 0, .8]]},
+    representation_type=rt,
+    star_count=200
+)# .rvs()
 
-""" cluster_data = cluster.rvs(size=200)
-cluster_data['tag'] = pd.DataFrame(np.ones((200,)))
+sample = Sample(field, [cluster]).rvs()
 
+cluster_data['tag'] = pd.DataFrame(np.ones((2000,)))
 data = pd.concat([field_data, cluster_data], axis=0)
-
+# data = cluster_data
 print('drawing graphs')
-
-sns.jointplot(data=data, x='parallax', y='parallax_error', hue='tag')
+# sns.jointplot(data=data, x='parallax', y='parallax_error', hue='tag')
 # sns.jointplot(data=data, x='pmra', y='pmra_error', hue='tag')
 # sns.jointplot(data=data, x='pmdec', y='pmdec_error', hue='tag')
-sns.jointplot(data=data, x='pmra', y='pmdec', hue='tag')
 sns.jointplot(data=data, x='ra', y='dec', hue='tag')
-
+sns.jointplot(data=data, x='parallax', y='ra', hue='tag')
+""" sns.jointplot(data=data, x='x', y='y', hue='tag')
+sns.jointplot(data=data, x='x', y='z', hue='tag')
+sns.jointplot(data=data, x='y', y='z', hue='tag') """
 plt.show()  # , marginal_kws=dict(bins = 160, fill= False))
- """
-
-# EDSD(a=0, b=3).check_ppf_error(wl=1.1, w0=-.15, wf=4.1)
-""" EDSD(a=0, b=3).rvs(wl=1.1, w0=-.15, wf=4.1, size=100)
 
 
-print('coso') """
-
-def cartesian_to_polar(coords):
-    coords = SkyCoord(
-        x=coords[:, 0], y=coords[:, 1], z=coords[:, 2],
-        unit='pc', representation_type='cartesian', frame='icrs'
-        )
-    coords.representation_type = 'spherical'
-    return np.vstack((coords.ra.deg, coords.dec.deg, coords.distance.parallax.mas)).T
-    
-def polar_to_cartesian(coords):
-    coords = SkyCoord(
-        ra=coords[:,0]*u.degree, dec=coords[:,1]*u.degree, distance=Distance(parallax=coords[:,2]*u.mas),
-        representation_type='spherical', frame='icrs'
-        )
-    coords.representation_type = 'cartesian'
-    return np.vstack((coords.x.value, coords.y.value, coords.z.value)).T
 
 
-data = load_file("/home/simon/repos/opencluster/scripts/data/NGC_2477/NGC_2477_data_2021-05-10_08-02-15")
+""" TESTING COORDS
+data = load_file(
+    "/home/simon/repos/opencluster/scripts/data/NGC_2477/NGC_2477_data_2021-05-10_08-02-15")
 data = data[['ra', 'dec', 'parallax']].to_pandas().to_numpy()
 coords = polar_to_cartesian(data)
 c2 = cartesian_to_polar(coords)
-
-""" d = pd.DataFrame(r)
-d.columns = ['x', 'y', 'z']
-sns.pairplot(d) """
-# plt.show()
-
+"""

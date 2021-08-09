@@ -1,4 +1,6 @@
-from opencluster.synthetic import EDSD, polar_to_cartesian, cartesian_to_polar
+from opencluster.synthetic import EDSD, polar_to_cartesian, cartesian_to_polar, is_inside_circle, cone_region, Cluster, Field, Sample
+from scipy.stats import kstest
+import math
 import numpy as np
 import pytest
 
@@ -28,11 +30,34 @@ class TestEDSD:
         assert sample.min() >= max(0, -.15)
         assert sample.max() <= min(3, 4.1)
 
-class TestCoordTransform:
+class TestHelpers:
     def test_coord_transform(self):
         cartesian = np.random.uniform(low=-16204., high=16204., size=(1000, 3))
         polar = cartesian_to_polar(cartesian)
         assert np.allclose(cartesian, polar_to_cartesian(polar))
+
+    def test_cone_region(self):
+        center = np.random.uniform(size=2)
+        radius = np.random.uniform()
+        size = int(1e5)
+        data = cone_region(center, radius, size)
+        dx = np.abs(data[:,0]-center[0])
+        dy = np.abs(data[:,1]-center[1])
+        assert data.shape == (size, 2)
+        assert data[np.sqrt(dx**2 + dy**2) > radius].shape[0] == 0
+        assert data[~is_inside_circle(center, radius, data)].shape[0] == 0
+        k = radius/math.sqrt(2)
+        square = data[(dx <= k) & (dy <= k)]
+        sx, sy = square[:,0], square[:,1]
+        assert kstest(sx, 'uniform', args=(sx.min(), sx.max() - sx.min())).pvalue > .05
+        assert kstest(sy, 'uniform', args=(sy.min(), sy.max() - sy.min())).pvalue > .05
+
+    def test_is_in_dist(self):
+        center = np.random.uniform(size=2)
+        radius = np.random.uniform()
+        size = int(1e5)
+        data = cone_region(center, radius, size)
+        
 
 class TestCrop:
     def test_draw_3Dcontour(self):
