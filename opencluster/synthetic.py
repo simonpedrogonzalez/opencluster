@@ -40,7 +40,21 @@ def polar_to_cartesian(coords):
     coords.representation_type = 'cartesian'
     return np.vstack((coords.x.value, coords.y.value, coords.z.value)).T
 
+@attrs(auto_attribs=True, init=False)
 class EDSD(stats.rv_continuous):
+    
+    w0:float= attrib(validator=[validators.instance_of(float)], default=1.)
+    wl:float= attrib(validator=[validators.instance_of(float)], default=2.)
+    wf:float= attrib(validator=[validators.instance_of(float)], default=5.)
+   
+    def __init__(self, w0:float, wl:float, wf:float, **kwargs):
+        super().__init__(**kwargs)
+        if not self._argcheck(w0, wl, wf):
+            raise ValueError('Incorrect parameters types or values')
+        self.w0 = w0
+        self.wl = wl
+        self.wf = wf
+
     def _pdf(self, x, wl, w0, wf):
         return np.piecewise(x, [(x <= w0) + (x >= wf)], [
             0,
@@ -80,7 +94,20 @@ class EDSD(stats.rv_continuous):
         ])
 
     def _argcheck(self, wl, w0, wf):
-        return (w0 < wf)
+        if not isinstance(wl, (float, int)):
+            raise TypeError('wl parameter expected int or float')
+        if not isinstance(w0, (float, int)):
+            raise TypeError('w0 parameter expected int or float')
+        if not isinstance(wf, (float, int)):
+            raise TypeError('wf parameter expected int or float')
+        if not (w0 < wf):
+            raise ValueError('w0 must be < than wf')
+        if self.a:
+            if self.b and (self.a > self.b) or np.isclose(self.a, self.b):
+                raise ValueError('a must be < than b')
+            if np.isclose(self.a, wf):
+                raise ValueError('a must be < than wf')
+        return True
 
     """ def check_ppf_error(self, wl, w0, wf):
         x = np.linspace(w0, wf, 10000)
@@ -108,7 +135,8 @@ class EDSD(stats.rv_continuous):
         plt.setp(ax, xlim=(w0, wf))
         plt.show() """
 
-    def rvs(self, wl, w0, wf, size):
+    def rvs(self, size):
+        wl, w0, wf = self.wl, self.w0, self.wf
         if not self._argcheck(wl, w0, wf):
             raise ValueError('wf must be greater than w0')
         limits = np.array(
@@ -123,6 +151,7 @@ class EDSD(stats.rv_continuous):
                 new_sample <= limits[1])]
             sample = np.concatenate((sample, new_sample), axis=0)
         return sample[:size]
+
 
 def uniform_cube(lows: tuple, highs: tuple, size: int = 1):
     return np.random.uniform(low=lows, high=highs, size=(size, 3))
@@ -275,8 +304,7 @@ class Field:
         data[['pmra', 'pmdec']] = pd.DataFrame(
                 np.vstack((pm[:, 0], pm[:, 1])).T)
         plx_params = self.plx_params
-        wl, w0, wf = plx_params.pop('wl'), plx_params.pop('w0'), plx_params.pop('wf')
-        plx = EDSD(**plx_params).rvs(wl, w0, wf, size=size)
+        plx = EDSD(**plx_params).rvs(size=size)
         ra_dec_plx = np.vstack((ra_dec[:,0], ra_dec[:,1], plx)).T
         if self.representation_type == 'cartesian':
             xyz = polar_to_cartesian(ra_dec_plx)
@@ -381,6 +409,7 @@ pm_error_params = (
     {'w0': -.15, 'wl': 1.1, 'wf': 3.4, 'a': 0, 'b': 3.4},
     {'w0': -.15, 'wl': 1.1, 'wf': 3.4, 'a': 0, 'b': 3.4}) """
 
+e = EDSD(a=3, b=5, w0=1, wl=2, wf=3)
 rt = 'spherical'
 field = Field(
     plx_params={'w0': 1, 'wl': 2, 'wf': 12},

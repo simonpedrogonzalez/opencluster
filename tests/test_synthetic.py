@@ -1,5 +1,6 @@
 from opencluster.synthetic import EDSD, polar_to_cartesian, cartesian_to_polar, is_inside_circle, cone_region, Cluster, Field, Sample
 from scipy.stats import kstest
+import pandas as pd
 import math
 import numpy as np
 import pytest
@@ -57,7 +58,48 @@ class TestHelpers:
         radius = np.random.uniform()
         size = int(1e5)
         data = cone_region(center, radius, size)
-        
+
+class Field:
+    @pytest.mark.parametrize(
+        'plx, space, pm, star_count, representation_type, test',
+        [(UniformCircle(), UniformCircle(), Norm2D(), 1, 'cartesian', TypeError),
+        (EDSD(), Norm2D(), Norm2D(), 1, 'spherical', TypeError),
+        (EDSD(), UniformCircle(), UniformCircle(), 1, 'cartesian', TypeError),
+        (EDSD(), UniformCircle(), Norm2D(), 1., 'cartesian', TypeError),
+        (EDSD(), UniformCircle(), Norm2D(), -1, 'cartesian', ValueError),
+        (EDSD(), UniformCircle(), Norm2D(), 1, 'other', ValueError),
+        (EDSD(), UniformCircle(), Norm2D(), int(5e6), 'cartesian', 'ok'),
+        (EDSD(), UniformCircle(), Norm2D(), 200, 'spherical', 'ok'),
+        ])
+    def test_attrs(self, plx, space, pm, star_count, representation_type, test):
+        if issubclass(test, Exception):
+            with pytest.raises(test):
+                Field(plx=plx, space=space, pm=pm, star_count=star_count, representation_type=representation_type)
+        else:
+            field = Field(plx=plx, space=space, pm=pm, star_count=star_count, representation_type=representation_type)
+    
+    def test_rvs(self):
+        field_data = Field(
+            plx=EDSD(),
+            space=UniformCircle(),
+            pm=Norm2D(),
+            star_count=int(1e5),
+            representation_type='spherical'
+        ).rvs()
+        assert isinstance(field_data, pd.DataFrame)
+        assert field_data.shape == (int(1e5), 5)
+        assert sorted(list(field_data.columns)) == sorted(['ra', 'dec', 'parallax', 'pmra', 'pmdec'])
+        field_data = Field(
+            plx=EDSD(),
+            space=UniformCircle(),
+            pm=Norm2D(),
+            star_count=int(1e5),
+            representation_type='cartesian'
+        ).rvs()
+        assert isinstance(field_data, pd.DataFrame)
+        assert field_data.shape == (int(1e5), 5)
+        assert sorted(list(field_data.columns)) == sorted(['ra', 'dec', 'x', 'y', 'z'])
+
 
 class TestCrop:
     def test_draw_3Dcontour(self):
