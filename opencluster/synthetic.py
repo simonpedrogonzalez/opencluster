@@ -43,9 +43,9 @@ def polar_to_cartesian(coords):
 @attrs(auto_attribs=True, init=False)
 class EDSD(stats.rv_continuous):
     
-    w0:float= attrib(validator=[validators.instance_of(float)], default=1.)
-    wl:float= attrib(validator=[validators.instance_of(float)], default=2.)
-    wf:float= attrib(validator=[validators.instance_of(float)], default=5.)
+    w0: float
+    wl: float
+    wf: float
    
     def __init__(self, w0:float, wl:float, wf:float, **kwargs):
         super().__init__(**kwargs)
@@ -171,12 +171,28 @@ def square_region(ra_range, dec_range, n):
     maxs = [ra_range[1], dec_range[1]]
     return np.random.uniform(low=mins, high=maxs, size=(n, 2))
 
-def cone_region(center, radius, n):
-    theta = np.random.uniform(size=n) * 2 * np.pi
-    r = radius * np.random.uniform(size=n) ** .5
-    x = r * np.cos(theta) + center[0]
-    y = r * np.sin(theta) + center[1]
-    return np.vstack((x, y)).T
+
+@attrs(auto_attribs=True)
+class UniformCircle(stats._multivariate.multi_rv_frozen):
+    center: Tuple[float,float] = attrib(default=(0., 0.))
+    radius: float = attrib(
+        validator=validators.instance_of((float, int)),
+        default=0.)
+    
+    @center.validator
+    def center_check(self, attribute, value):
+        if not isinstance(value, tuple) or \
+            len(value) != 2 or \
+            not isinstance(value[0], (float, int)) or\
+            not isinstance(value[0], (float, int)):
+            raise ValueError('center must be tuple of length two of int or float')    
+
+    def rvs(self, size):
+        theta = stats.uniform().rvs(size=size) * 2 * np.pi
+        r = self.radius * stats.uniform().rvs(size=size) ** .5
+        x = r * np.cos(theta) + self.center[0]
+        y = r * np.sin(theta) + self.center[1]
+        return np.vstack((x, y)).T
 
 def norm2d(mean, cov, n):
     return np.random.multivariate_normal(mean, cov, n)
@@ -282,36 +298,48 @@ class Cluster:
         return data
 
 
+def in_range(min_value, max_value):
+    def in_range_validator(instance, attribute, value):
+        if value < float(min_value):
+            raise ValueError(f'{attribute} must be >= than {min_value}')
+        if value > float(max_value):
+            raise ValueError(f'{attribute} must be <= than {max_value}')
+
+
 @attrs(auto_attribs=True)
 class Field:
-    space_params: ConeRegionParams
-    plx_params: EDSDParams
-    pm_params: Norm2DParams
-    representation_type: str='spherical'
-    star_count: int=int(1e5)
+    space: stats._multivariate.multi_rv_frozen = attrib(
+        validator=validators.instance_of(stats._multivariate.multi_rv_frozen))
+    plx: stats.rv_continuous = attrib(
+        validator=validators.instance_of(stats.rv_continuous))
+    pm: stats._multivariate.multi_rv_frozen = attrib(
+        validator=validators.instance_of(stats._multivariate.multi_rv_frozen))
+    representation_type: str= attrib(
+        validator=validators.in_(['cartesian', 'spherical']),
+        default='spherical')
+    star_count: int= attrib(
+        validator=[ validators.instance_of(int), in_range(0, 'inf') ],
+        default=int(1e5))
+
+    @star_count.validator
+    def star_count_validator(self, attribute, value):
+        if not isinstance(value, int):
+            raise ValueError('star_count must be positive')
 
     def rvs(self):
         size = self.star_count
         data = pd.DataFrame()
-        ra_dec = cone_region(
-            self.space_params.get('center'),
-            self.space_params.get('radius'),
-            size)
-        pm = norm2d(
-            self.pm_params.get('means'),
-            self.pm_params.get('cov'),
-            size)
+        ra_dec = self.space.rvs(size)
+        pm = self.pm.rvs(size)
         data[['pmra', 'pmdec']] = pd.DataFrame(
                 np.vstack((pm[:, 0], pm[:, 1])).T)
-        plx_params = self.plx_params
-        plx = EDSD(**plx_params).rvs(size=size)
+        plx = self.plx.rvs(size)
         ra_dec_plx = np.vstack((ra_dec[:,0], ra_dec[:,1], plx)).T
         if self.representation_type == 'cartesian':
             xyz = polar_to_cartesian(ra_dec_plx)
             data[['x', 'y', 'z']] = pd.DataFrame(xyz)
-        elif self.representation_type == 'spherical':
+        else:
             data[['ra', 'dec', 'parallax']] = pd.DataFrame(ra_dec_plx)
-        else: raise ValueError('Invalid representation type')
         return data
 
 
@@ -409,12 +437,13 @@ pm_error_params = (
     {'w0': -.15, 'wl': 1.1, 'wf': 3.4, 'a': 0, 'b': 3.4},
     {'w0': -.15, 'wl': 1.1, 'wf': 3.4, 'a': 0, 'b': 3.4}) """
 
-e = EDSD(a=3, b=5, w0=1, wl=2, wf=3)
+e = EDSD(a=1, b=5, w0=1, wl=2, wf=3)
+u = UniformCircle(center=(1., 1.), radius=3.).rvs()
 rt = 'spherical'
 field = Field(
-    plx_params={'w0': 1, 'wl': 2, 'wf': 12},
-    pm_params={'means': (0., 0.), 'cov': [[10, -10], [-50, 10]]},
-    space_params={'center': (120.5, -27.5), 'radius': 5},
+    plx=EDSD(a=0, w0=1, wl=2, wf=12),
+    pm=stats.multivariate_normal(mean=(0., 0.), cov=10),
+    space=UniformCircle(center=(120.5, -27.5), radius=5),
     representation_type=rt,
     star_count=int(1e4)
 )# .rvs()

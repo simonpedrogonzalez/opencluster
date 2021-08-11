@@ -1,5 +1,5 @@
 from opencluster.synthetic import EDSD, polar_to_cartesian, cartesian_to_polar, is_inside_circle, cone_region, Cluster, Field, Sample
-from scipy.stats import kstest
+from scipy.stats import kstest, multivariate_normal
 import pandas as pd
 import math
 import numpy as np
@@ -9,7 +9,7 @@ import pytest
 class TestEDSD:
     def test_EDSD_argv_check(self):
         with pytest.raises(ValueError):
-            EDSD().rvs(wl=1.1, w0=4.1, wf=-.15, size=100)
+            EDSD(1,2,3).rvs(wl=1.1, w0=4.1, wf=-.15, size=100)
     
     def test_EDSD_pdf_cdf(self):
         # calculate pdf for 100 points, integrate
@@ -22,7 +22,7 @@ class TestEDSD:
         assert False
 
     def test_EDSD_rvs(self):
-        sample = EDSD().rvs(wl=1.1, w0=-.15, wf=4.1, size=100)
+        sample = EDSD(1,2,3).rvs(wl=1.1, w0=-.15, wf=4.1, size=100)
         assert sample.dtype == 'float64'
         assert sample.shape == (100,)
         assert sample.min() >= -.15
@@ -62,14 +62,14 @@ class TestHelpers:
 class Field:
     @pytest.mark.parametrize(
         'plx, space, pm, star_count, representation_type, test',
-        [(UniformCircle(), UniformCircle(), Norm2D(), 1, 'cartesian', TypeError),
-        (EDSD(), Norm2D(), Norm2D(), 1, 'spherical', TypeError),
-        (EDSD(), UniformCircle(), UniformCircle(), 1, 'cartesian', TypeError),
-        (EDSD(), UniformCircle(), Norm2D(), 1., 'cartesian', TypeError),
-        (EDSD(), UniformCircle(), Norm2D(), -1, 'cartesian', ValueError),
-        (EDSD(), UniformCircle(), Norm2D(), 1, 'other', ValueError),
-        (EDSD(), UniformCircle(), Norm2D(), int(5e6), 'cartesian', 'ok'),
-        (EDSD(), UniformCircle(), Norm2D(), 200, 'spherical', 'ok'),
+        [(UniformCircle(), UniformCircle(), multivariate_normal(), 1, 'cartesian', TypeError),
+         (EDSD(1,2,3), multivariate_normal(), multivariate_normal(), 1, 'spherical', TypeError),
+        (EDSD(1,2,3), UniformCircle(), UniformCircle(), 1, 'cartesian', TypeError),
+        (EDSD(1,2,3), UniformCircle(), multivariate_normal(), 1., 'cartesian', TypeError),
+        (EDSD(1,2,3), UniformCircle(), multivariate_normal(), -1, 'cartesian', ValueError),
+        (EDSD(1,2,3), UniformCircle(), multivariate_normal(), 1, 'other', ValueError),
+        (EDSD(1,2,3), UniformCircle(), multivariate_normal(), int(5e6), 'cartesian', 'ok'),
+        (EDSD(1,2,3), UniformCircle(), multivariate_normal(), 200, 'spherical', 'ok'),
         ])
     def test_attrs(self, plx, space, pm, star_count, representation_type, test):
         if issubclass(test, Exception):
@@ -80,9 +80,9 @@ class Field:
     
     def test_rvs(self):
         field_data = Field(
-            plx=EDSD(),
+            plx=EDSD(1,2,3),
             space=UniformCircle(),
-            pm=Norm2D(),
+            pm=multivariate_normal(),
             star_count=int(1e5),
             representation_type='spherical'
         ).rvs()
@@ -90,9 +90,9 @@ class Field:
         assert field_data.shape == (int(1e5), 5)
         assert sorted(list(field_data.columns)) == sorted(['ra', 'dec', 'parallax', 'pmra', 'pmdec'])
         field_data = Field(
-            plx=EDSD(),
+            plx=EDSD(1,2,3),
             space=UniformCircle(),
-            pm=Norm2D(),
+            pm=multivariate_normal(),
             star_count=int(1e5),
             representation_type='cartesian'
         ).rvs()
