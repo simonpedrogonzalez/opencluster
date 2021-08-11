@@ -177,14 +177,15 @@ class UniformCircle(stats._multivariate.multi_rv_frozen):
     center: Tuple[float,float] = attrib(default=(0., 0.))
     radius: float = attrib(
         validator=validators.instance_of((float, int)),
-        default=0.)
+        default=1.)
+    dim: float = attrib(default=2, init=False)
     
     @center.validator
     def center_check(self, attribute, value):
-        if not isinstance(value, tuple) or \
+        if not isinstance(value, (tuple, list, np.ndarray)) or \
             len(value) != 2 or \
-            not isinstance(value[0], (float, int)) or\
-            not isinstance(value[0], (float, int)):
+            not isinstance(value[0], (float, int)) or \
+            not isinstance(value[1], (float, int)):
             raise ValueError('center must be tuple of length two of int or float')    
 
     def rvs(self, size):
@@ -299,32 +300,34 @@ class Cluster:
 
 
 def in_range(min_value, max_value):
-    def in_range_validator(instance, attribute, value):
+    def range_validator(instance, attribute, value):
         if value < float(min_value):
             raise ValueError(f'{attribute} must be >= than {min_value}')
         if value > float(max_value):
             raise ValueError(f'{attribute} must be <= than {max_value}')
+    return range_validator
 
+def dist_has_n_dimensions(n):
+    def dist_has_n_dimensions_validator(instance, attribute, value):
+        if not value.dim:
+            raise TypeError(f'{attribute} does not have dim property')
+        elif value.dim != n:
+            raise ValueError(f'{attribute} must have {n} dimensions, but has {value.dim} dimensions')
+    return dist_has_n_dimensions_validator
 
 @attrs(auto_attribs=True)
 class Field:
     space: stats._multivariate.multi_rv_frozen = attrib(
-        validator=validators.instance_of(stats._multivariate.multi_rv_frozen))
-    plx: stats.rv_continuous = attrib(
-        validator=validators.instance_of(stats.rv_continuous))
+        validator=[ validators.instance_of(stats._multivariate.multi_rv_frozen), dist_has_n_dimensions(n=2) ])
+    plx: stats.rv_continuous = attrib(validator=validators.instance_of(stats.rv_continuous))
     pm: stats._multivariate.multi_rv_frozen = attrib(
-        validator=validators.instance_of(stats._multivariate.multi_rv_frozen))
+        validator=[validators.instance_of(stats._multivariate.multi_rv_frozen), dist_has_n_dimensions(n=2)])
     representation_type: str= attrib(
         validator=validators.in_(['cartesian', 'spherical']),
         default='spherical')
     star_count: int= attrib(
         validator=[ validators.instance_of(int), in_range(0, 'inf') ],
         default=int(1e5))
-
-    @star_count.validator
-    def star_count_validator(self, attribute, value):
-        if not isinstance(value, int):
-            raise ValueError('star_count must be positive')
 
     def rvs(self):
         size = self.star_count
@@ -437,8 +440,8 @@ pm_error_params = (
     {'w0': -.15, 'wl': 1.1, 'wf': 3.4, 'a': 0, 'b': 3.4},
     {'w0': -.15, 'wl': 1.1, 'wf': 3.4, 'a': 0, 'b': 3.4}) """
 
-e = EDSD(a=1, b=5, w0=1, wl=2, wf=3)
-u = UniformCircle(center=(1., 1.), radius=3.).rvs()
+""" e = EDSD(a=1, b=5, w0=1, wl=2, wf=3)
+u = UniformCircle(center=(1., 1.), radius=3.).rvs(3) """
 rt = 'spherical'
 field = Field(
     plx=EDSD(a=0, w0=1, wl=2, wf=12),
@@ -449,28 +452,28 @@ field = Field(
 )# .rvs()
 # field_data['tag'] = pd.DataFrame(np.zeros((int(1e3),)))
 
-cluster = Cluster(
+""" cluster = Cluster(
     pm_params={'means': (-2.4, 2), 'cov': [[.3, 0], [0, .3]]},
     space_params={'means':(121.5, -26.5, 3), 'cov':[[.8, 0, 0], [0, .8, 0], [0, 0, .8]]},
     representation_type=rt,
     star_count=200
-)# .rvs()
+) """# .rvs()
 
-sample = Sample(field, [cluster]).rvs()
+""" sample = Sample(field, [cluster]).rvs()
 
 cluster_data['tag'] = pd.DataFrame(np.ones((2000,)))
-data = pd.concat([field_data, cluster_data], axis=0)
+data = pd.concat([field_data, cluster_data], axis=0) """
 # data = cluster_data
-print('drawing graphs')
+# print('drawing graphs')
 # sns.jointplot(data=data, x='parallax', y='parallax_error', hue='tag')
 # sns.jointplot(data=data, x='pmra', y='pmra_error', hue='tag')
 # sns.jointplot(data=data, x='pmdec', y='pmdec_error', hue='tag')
-sns.jointplot(data=data, x='ra', y='dec', hue='tag')
-sns.jointplot(data=data, x='parallax', y='ra', hue='tag')
+""" sns.jointplot(data=data, x='ra', y='dec', hue='tag')
+sns.jointplot(data=data, x='parallax', y='ra', hue='tag') """
 """ sns.jointplot(data=data, x='x', y='y', hue='tag')
 sns.jointplot(data=data, x='x', y='z', hue='tag')
 sns.jointplot(data=data, x='y', y='z', hue='tag') """
-plt.show()  # , marginal_kws=dict(bins = 160, fill= False))
+# plt.show()  # , marginal_kws=dict(bins = 160, fill= False))
 
 
 
