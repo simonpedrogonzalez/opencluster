@@ -1,4 +1,4 @@
-from opencluster.synthetic import EDSD, polar_to_cartesian, cartesian_to_polar, is_inside_circle, UniformCircle, Cluster, Field, Sample
+from opencluster.synthetic import EDSD, polar_to_cartesian, cartesian_to_polar, is_inside_circle, UniformCircle, UniformSphere, Cluster, Field, Synthetic
 from scipy.stats import kstest, multivariate_normal
 import pandas as pd
 import math
@@ -43,7 +43,8 @@ class TestHelpers:
     def test_uniform_circle(self):
         center = np.random.uniform(size=2)
         radius = np.random.uniform()
-        size = int(1e5)
+        size = int(1e7)
+        assert UniformCircle().dim == 2
         data = UniformCircle(center=center, radius=radius).rvs(size)
         dx = np.abs(data[:,0]-center[0])
         dy = np.abs(data[:,1]-center[1])
@@ -56,8 +57,24 @@ class TestHelpers:
         assert kstest(sx, 'uniform', args=(sx.min(), sx.max() - sx.min())).pvalue > .05
         assert kstest(sy, 'uniform', args=(sy.min(), sy.max() - sy.min())).pvalue > .05
 
-    def test_is_in_dist(self):
-        return  False
+    def test_uniform_sphere(self):
+        center = np.random.uniform(size=3)
+        radius = np.random.uniform()
+        size = int(1e5)
+        assert UniformSphere().dim == 3
+        data = UniformSphere(center, radius).rvs(size)
+        assert data.shape == (size, 3)
+        dx = np.abs(data[:,0]-center[0])
+        dy = np.abs(data[:,1]-center[1])
+        dz = np.abs(data[:,2]-center[2])
+        assert data[np.sqrt(dx**2 + dy**2 + dz**2) > radius].shape[0] == 0
+        assert data[~is_inside_circle(center, radius, data)].shape[0] == 0
+        k = 2 * radius / math.sqrt(3)
+        cube = data[(dx <= k) & (dy <= k) & (dz <= k)]
+        sx, sy, sz = cube[:,0], cube[:,1], cube[:,2]
+        assert kstest(sx, 'uniform', args=(sx.min(), sx.max() - sx.min())).pvalue > .05
+        assert kstest(sy, 'uniform', args=(sy.min(), sy.max() - sy.min())).pvalue > .05
+        assert kstest(sz, 'uniform', args=(sz.min(), sz.max() - sz.min())).pvalue > .05
 
 class TestField:
     @pytest.mark.parametrize(
@@ -106,21 +123,50 @@ class TestField:
 class TestCluster:
     @pytest.mark.parametrize(
         'space, pm, star_count, representation_type, test',
-        [(UniformCircle(), multivariate_normal(), 1, 'cartesian', TypeError),
-         (multivariate_normal(), multivariate_normal(), 1, 'spherical', TypeError),
-        (UniformCircle(), UniformCircle(), 1, 'cartesian', TypeError),
-        (UniformCircle(), multivariate_normal(), 1., 'cartesian', TypeError),
-        (UniformCircle(), multivariate_normal(), -1, 'cartesian', ValueError),
-        (UniformCircle(), multivariate_normal(), 1, 'other', ValueError),
-        (UniformCircle(), multivariate_normal(), int(5e6), 'cartesian', type('ok')),
-        (UniformCircle(), multivariate_normal(), 200, 'spherical', type('ok')),
+        [
+           (multivariate_normal((0,0,0)), multivariate_normal((0,0)), 1, 'cartesian', Ok),
+            (EDSD(1,2,3), multivariate_normal((0,0)), 1, 'cartesian', TypeError),
+            (UniformCircle(), multivariate_normal((0,0)), 1, 'cartesian', ValueError),
+            (multivariate_normal((0,0,0)), EDSD(1,2,3), 1, 'cartesian', TypeError),
+            (multivariate_normal((0,0,0)), multivariate_normal(), 1, 'cartesian', ValueError),
+            (multivariate_normal((0,0,0)), multivariate_normal((0,0)), .1, 'cartesian', TypeError),
+            (multivariate_normal((0,0,0)), multivariate_normal((0,0)), -1, 'cartesian', ValueError),
+            (multivariate_normal((0,0,0)), multivariate_normal((0,0)), 1, 'other', ValueError),
+            (multivariate_normal((0,0,0)), multivariate_normal((0,0)), 1, 'spherical', Ok),
         ])
     def test_attrs(self, space, pm, star_count, representation_type, test):
         if issubclass(test, Exception):
             with pytest.raises(test):
                 Cluster(space=space, pm=pm, star_count=star_count, representation_type=representation_type)
         else:
-            cluster = Cluster(space=space, pm=pm, star_count=star_count, representation_type=representation_type)
+            Cluster(space=space, pm=pm, star_count=star_count, representation_type=representation_type)
+
+    def test_rvs(self):
+        cluster_data = Cluster(
+            space=multivariate_normal((0,0,0)),
+            pm=multivariate_normal((0,0)),
+            star_count=100,
+            representation_type='spherical'
+        ).rvs()
+        assert isinstance(cluster_data, pd.DataFrame)
+        assert cluster_data.shape == (100, 5)
+        assert sorted(list(cluster_data.columns)) == sorted(['ra', 'dec', 'parallax', 'pmra', 'pmdec'])
+        cluster_data = Cluster(
+            space=multivariate_normal((0,0,0)),
+            pm=multivariate_normal((0,0)),
+            star_count=100,
+            representation_type='cartesian'
+        ).rvs()
+        assert isinstance(cluster_data, pd.DataFrame)
+        assert cluster_data.shape == (100, 5)
+        assert sorted(list(cluster_data.columns)) == sorted(['x', 'y', 'z', 'pmra', 'pmdec'])
+
+class TestSynthetic:
+    def test_attrs(self):
+        assert False
+
+    def test_rvs(self):
+        assert False
 
 class TestCrop:
     def test_draw_3Dcontour(self):
@@ -128,11 +174,11 @@ class TestCrop:
         # draw shape
         # assert data in sphere
         # assert at least one point in ellipse border
-        return True
+        assert True
     
     def test_draw_2Dcontour(self):
         # generate gaussian 2d data
         # draw shape (ellipse)
         # assert data in ellipse
         # assert at least one point in ellipse border
-        return False
+        assert True

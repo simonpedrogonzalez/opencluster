@@ -13,17 +13,17 @@ from scipy import stats
 from scipy.optimize import curve_fit
 from typing_extensions import TypedDict
 from typing import Optional, Tuple, List, Union, Callable
-from attr import attrib, attrs, validators, Factory
+from attr import attrib, attrs, validators
 import copy
 import math
 from astropy.coordinates import Distance, SkyCoord
 import astropy.units as u
 
-np.seterr(over='raise')
+# np.seterr(over='raise')
 # np.seterr(invalid='raise')
 # np.seterr(invalid='divide')
-np.random.seed(0)
 
+# Coordinate transformation
 def cartesian_to_polar(coords):
     coords = SkyCoord(
         x=coords[:, 0], y=coords[:, 1], z=coords[:, 2],
@@ -40,6 +40,30 @@ def polar_to_cartesian(coords):
     coords.representation_type = 'cartesian'
     return np.vstack((coords.x.value, coords.y.value, coords.z.value)).T
 
+# Custom validators
+def in_range(min_value, max_value):
+    def range_validator(instance, attribute, value):
+        if value < float(min_value):
+            raise ValueError(f'{attribute.name} attribute must be >= than {min_value}')
+        if value > float(max_value):
+            raise ValueError(f'{attribute.name} attribute must be <= than {max_value}')
+    return range_validator
+
+def dist_has_n_dimensions(n: int):
+    def dist_has_n_dimensions_validator(instance, attribute, value):
+        if not value.dim:
+            raise TypeError(f'{attribute.name} attribute does not have dim property')
+        elif value.dim != n:
+            raise ValueError(f'{attribute.name} attribute must have {n} dimensions, but has {value.dim} dimensions')
+    return dist_has_n_dimensions_validator
+
+def has_len(length: int):
+    def has_len_validator(instance, attribute, value):
+        if len(value) != length:
+            raise ValueError(f'{attribute.name} attribute must have length {length}, but has length {len(value)}')
+    return has_len_validator
+
+# Custom distributions
 @attrs(auto_attribs=True, init=False)
 class EDSD(stats.rv_continuous):
     
@@ -135,10 +159,9 @@ class EDSD(stats.rv_continuous):
         plt.setp(ax, xlim=(w0, wf))
         plt.show() """
 
-    def rvs(self, size):
+    def rvs(self, size: int=1):
         wl, w0, wf = self.wl, self.w0, self.wf
-        if not self._argcheck(wl, w0, wf):
-            raise ValueError('wf must be greater than w0')
+        self._argcheck(wl, w0, wf)
         limits = np.array(
             [max(w0+1e-10, self.a), min(wf-1e-10, self.b)]).astype('float64')
         rv_limits = self._cdf(limits, wl, w0, wf)
@@ -153,62 +176,51 @@ class EDSD(stats.rv_continuous):
         return sample[:size]
 
 
-def uniform_cube(lows: tuple, highs: tuple, size: int = 1):
-    return np.random.uniform(low=lows, high=highs, size=(size, 3))
-
-def uniform_sphere(center: tuple, radius: float, size: int = 1):
-    phi = np.random.uniform(0, 2*np.pi, size)
-    cos_theta = np.random.uniform(-1, 1, size)
-    theta = np.arccos(cos_theta)
-    r = np.cbrt(np.random.uniform(0, radius, size))
-    x = r * np.sin(theta) * np.cos(phi) + center[0]
-    y = r * np.sin(theta) * np.sin(phi) + center[1]
-    z = r * np.cos(theta) + center[2]
-    return np.vstack((x, y, z)).T
-
-def square_region(ra_range, dec_range, n):
-    mins = [ra_range[0], dec_range[0]]
-    maxs = [ra_range[1], dec_range[1]]
-    return np.random.uniform(low=mins, high=maxs, size=(n, 2))
-
-
 @attrs(auto_attribs=True)
-class UniformCircle(stats._multivariate.multi_rv_frozen):
-    center: Tuple[float,float] = attrib(default=(0., 0.))
+class UniformSphere(stats._multivariate.multi_rv_frozen):
+    center: Tuple[float,float,float] = attrib(validator=[
+        validators.deep_iterable(member_validator=validators.instance_of((int, float))),
+        has_len(3)],
+        default=(0., 0., 0.))
     radius: float = attrib(
         validator=validators.instance_of((float, int)),
         default=1.)
-    dim: float = attrib(default=2, init=False)
-    
-    @center.validator
-    def center_check(self, attribute, value):
-        if not isinstance(value, (tuple, list, np.ndarray)) or \
-            len(value) != 2 or \
-            not isinstance(value[0], (float, int)) or \
-            not isinstance(value[1], (float, int)):
-            raise ValueError('center must be tuple of length two of int or float')    
+    dim: float = attrib(default=3, init=False) 
 
-    def rvs(self, size):
+    def rvs(self, size: int = 1):
+        phi = stats.uniform().rvs(size) * 2 * np.pi
+        cos_theta = stats.uniform(-1, 2).rvs(size)
+        theta = np.arccos(cos_theta)
+        r = np.cbrt(stats.uniform().rvs(size)) * self.radius
+        x = r * np.sin(theta) * np.cos(phi) + self.center[0]
+        y = r * np.sin(theta) * np.sin(phi) + self.center[1]
+        z = r * np.cos(theta) + self.center[2]
+        return np.vstack((x, y, z)).T
+
+@attrs(auto_attribs=True)
+class UniformCircle(stats._multivariate.multi_rv_frozen):
+    center: Tuple[float,float] = attrib(validator=[
+        validators.deep_iterable(member_validator=validators.instance_of((int, float))),
+        has_len(2)],
+        default=(0., 0.))
+    radius: float = attrib(
+        validator=validators.instance_of((float, int)),
+        default=1.)
+    dim: float = attrib(default=2, init=False) 
+
+    def rvs(self, size: int=1):
         theta = stats.uniform().rvs(size=size) * 2 * np.pi
         r = self.radius * stats.uniform().rvs(size=size) ** .5
         x = r * np.cos(theta) + self.center[0]
         y = r * np.sin(theta) + self.center[1]
         return np.vstack((x, y)).T
 
-def norm2d(mean, cov, n):
-    return np.random.multivariate_normal(mean, cov, n)
-
-def norm3d(mean, cov, n):
-    return np.random.multivariate_normal(mean, cov, n)
 
 def skewnorm(a, loc, scale, n):
     y = stats.skewnorm.rvs(a, loc, scale, n)
     df = pd.DataFrame(y)
     df.columns = ['plx']
     return df
-
-def norm(mean, sigma, n):
-    return np.random.normal(mean, sigma, n)
 
 def truncated_gumbel(lock, scale, low, high, n):
     rv_limits = (stats.gumbel_r.cdf(low, lock, scale),
@@ -234,86 +246,34 @@ def truncated_gumbel(lock, scale, low, high, n):
         return table[:, 1]
     else:
         return EDSD(a=0, b=wf).rvs(wl, w0, wf, size=n) """
-class EDSDParams(TypedDict):
-    wl: float
-    w0: float
-    wf: float
-    a: Optional[float]
-    b: Optional[float]
 
-class NormParams(TypedDict):
-    mean: float
-    sigma: float
-
-""" class PlxErrorParams(EDSDParams):
-    y0: Optional[float]
-    x0: Optional[float]
-class PlxFieldParams(TypedDict):
-    EDSDParams
-class PlxClusterParams(TypedDict):
-    dist_params: NormParams
-    err_params: PlxErrorParams """
-
-class Norm2DParams(TypedDict):
-    means: Tuple[float, float]
-    cov: List[List[float]]
-
-
-class Norm3DParams(TypedDict):
-    means: Tuple[float, float, float]
-    cov: List[List[List[float]]]
-
-
-class PmParams(TypedDict):
-    Norm2DParams
-
-
-class ConeRegionParams(TypedDict):
-    center: Tuple[float, float]
-    radius: float
-
-
+# Data generators
 @attrs(auto_attribs=True)
 class Cluster:
-    space_params: Norm3DParams
-    pm_params: Norm2DParams
-    representation_type: str='spherical'
-    star_count: int=200
+
+    space: stats._multivariate.multi_rv_frozen = attrib(
+        validator=[ validators.instance_of(stats._multivariate.multi_rv_frozen), dist_has_n_dimensions(n=3) ])
+    pm: stats._multivariate.multi_rv_frozen = attrib(
+        validator=[validators.instance_of(stats._multivariate.multi_rv_frozen), dist_has_n_dimensions(n=2)])
+    representation_type: str= attrib(
+        validator=validators.in_(['cartesian', 'spherical']),
+        default='spherical')
+    star_count: int= attrib(
+        validator=[ validators.instance_of(int), in_range(0, 'inf') ],
+        default=200)
 
     def rvs(self):
         size = self.star_count
         data = pd.DataFrame()
-        mean = np.reshape(polar_to_cartesian(np.atleast_2d(self.space_params.get('means'))), (3,))
-        xyz = norm3d(
-            mean,
-            self.space_params.get('cov'), size)
+        xyz = self.space.rvs(size)
         if self.representation_type == 'spherical':
             data[['ra', 'dec', 'parallax']] = pd.DataFrame(cartesian_to_polar(xyz))
-        elif self.representation_type == 'cartesian':
+        else:
             data[['x', 'y', 'z']] = pd.DataFrame(xyz)
-        else: raise ValueError('Invalid representation type')
-        pm = norm2d(
-            self.pm_params.get('means'),
-            self.pm_params.get('cov'), size)
+        pm = self.pm.rvs(size)
         data[['pmra', 'pmdec']] = pd.DataFrame(pm)
         return data
 
-
-def in_range(min_value, max_value):
-    def range_validator(instance, attribute, value):
-        if value < float(min_value):
-            raise ValueError(f'{attribute} must be >= than {min_value}')
-        if value > float(max_value):
-            raise ValueError(f'{attribute} must be <= than {max_value}')
-    return range_validator
-
-def dist_has_n_dimensions(n):
-    def dist_has_n_dimensions_validator(instance, attribute, value):
-        if not value.dim:
-            raise TypeError(f'{attribute} does not have dim property')
-        elif value.dim != n:
-            raise ValueError(f'{attribute} must have {n} dimensions, but has {value.dim} dimensions')
-    return dist_has_n_dimensions_validator
 
 @attrs(auto_attribs=True)
 class Field:
@@ -346,13 +306,12 @@ class Field:
         return data
 
 
-def is_from_dist(cdf: Callable, x, *args, **kwargs):
-    return np.isclose(cdf(x, args, kwargs), np.zeros_like(x)) 
-
 @attrs(auto_attribs=True)
-class Sample:
-    field: Field
-    clusters: List[Cluster]
+class Synthetic:
+    field: Field = attrib(validator=validators.instance_of(Field))
+    clusters: List[Cluster] = attrib(validator=validators.deep_iterable(
+        member_validator=validators.instance_of(Cluster)
+        ))
 
     def rvs(self):
         self.field.representation_type = 'spherical'
@@ -378,70 +337,54 @@ class Sample:
             field_data = pd.concat([field_data, cluster_data], axis=0)
 
         return field_data
-                
 
+def is_from_dist(cdf: Callable, x, *args, **kwargs):
+    return np.isclose(cdf(x, args, kwargs), np.zeros_like(x)) 
         
 def is_inside_circle(center, radius, data):
     dx = np.abs(data[:,0]-center[0])
     dy = np.abs(data[:,1]-center[1])
     return (dx < radius) & (dy < radius) & ((dx + dy <= radius) | (dx**2 + dy**2 <= radius**2))
-# radec
-# df = square_region((118, 123), (-25, -30), int(4e5))
-# df = cone_region((120.5, -27.5), 5, int(4e5))
 
-# pm
-# df = norm2d([0, 0], [[10, -10], [-50, 10]], int(4e5))
+def is_inside_sphere(center, radius, data):
+    dx = np.abs(data[:,0]-center[0])
+    dy = np.abs(data[:,1]-center[1])
+    dz = np.abs(data[:,2]-center[2])
+    return (dx < radius) & (dy < radius) & ((dx + dy + dz <= radius) | (dx**2 + dy**2 + dx**2 <= radius**2))
 
-# sns.histplot(data=df, bins=100)
-# sns.scatterplot(x=df['x'], y = df['plx'])
-# sns.jointplot(data=df, x='pmra', y='pmdec', marker='.', marginal_kws=dict(bins = 160, fill= False))
-# plx
-""" w0 = -.1
-wl = 1.2
-wf = 5
-plx = EDSD().rvs(wl, w0, wf, size=int(4e5))
-df = pd.DataFrame(plx)
-sns.histplot(data=df, bins=100)
+
+""" center = (0,0,0)
+radius = 1.
+size = 1000000
+data = UniformSphere(center, radius).rvs(size)
+dx = np.abs(data[:,0]-center[0])
+dy = np.abs(data[:,1]-center[1])
+dz = np.abs(data[:,2]-center[2])
+tag = np.zeros(data.shape[0])
+
+
+k = radius / math.sqrt(3)
+cube = data[(dx <= k) & (dy <= k) & (dz <= k)]
+sx, sy, sz = cube[:,0], cube[:,1], cube[:,2]
+
+tag[(dx <= k) & (dy <= k) & (dz <= k)] = 1
+# data[np.sqrt(dx**2 + dy**2 + dx**2) > radius]
+
+stats.kstest(sx, 'uniform', args=(sx.min(), sx.max() - sx.min())).pvalue > .05
+stats.kstest(sy, 'uniform', args=(sy.min(), sy.max() - sy.min())).pvalue > .05
+stats.kstest(sz, 'uniform', args=(sz.min(), sz.max() - sz.min())).pvalue > .05
+
+fig = plt.figure()
+ax = fig.add_subplot(111, projection = '3d')
+data = pd.DataFrame({"x": data[:,0].T, "y": data[:,1].T, 'z': data[:,2].T, "label": tag})
+groups = data.groupby("label")
+
+for name, group in groups:
+    if name == 0:
+        ax.scatter(group['x'], group['y'], group['z'], label=name)
 plt.show()
- """
+print()
 
-# err pm
-# option 1 with gumbel function
-""" scale, lock = .27, .05
-df = pd.DataFrame(truncated_gumbel(lock, scale, 0, 3.4, int(2e5))) """
-
-# option 2 with same as plx
-""" w0, wl, wf = -.15, 1.1, 3.4
-df = pd.DataFrame(EDSD(a=0, b=3.4).rvs(wl, w0, wf, size=int(2e5)))
-sns.histplot(data=df, bins=1000)
-plt.show() """
-
-# plx error
-
-""" w0 = -.1
-wl = 1.2
-wf = 5
-n = int(4e5)
-plx = EDSD().rvs(wl, w0, wf, size=n)
-
-w0, wl, wf = -.15, 1.1, 4.1
-y0, x0 = .15, .15
-plx_err = plx_error(w0, wl, wf, y0, x0, plx)
-df = pd.DataFrame(np.vstack((plx, plx_err)).T)
-df.columns = ['plx', 'plx_err']
-df = df[df['plx'] < 1.6]
-#sns.histplot(data=df['plx_err'], bins=1000)
-# sns.scatterplot(x=df['plx'], y=df['plx_err'], s=.5)
-sns.jointplot(data=df, x='plx', y='plx_err', marker='.') # , marginal_kws=dict(bins = 160, fill= False))
-plt.show() """
-
-""" plx_error_params = {'w0': -.15, 'wl': 1.1, 'wf': 4.1, 'y0': .15, 'x0': .05}
-pm_error_params = (
-    {'w0': -.15, 'wl': 1.1, 'wf': 3.4, 'a': 0, 'b': 3.4},
-    {'w0': -.15, 'wl': 1.1, 'wf': 3.4, 'a': 0, 'b': 3.4}) """
-
-""" e = EDSD(a=1, b=5, w0=1, wl=2, wf=3)
-u = UniformCircle(center=(1., 1.), radius=3.).rvs(3) """
 rt = 'spherical'
 field = Field(
     plx=EDSD(a=0, w0=1, wl=2, wf=12),
@@ -451,7 +394,7 @@ field = Field(
     star_count=int(1e4)
 )# .rvs()
 # field_data['tag'] = pd.DataFrame(np.zeros((int(1e3),)))
-
+ """
 """ cluster = Cluster(
     pm_params={'means': (-2.4, 2), 'cov': [[.3, 0], [0, .3]]},
     space_params={'means':(121.5, -26.5, 3), 'cov':[[.8, 0, 0], [0, .8, 0], [0, 0, .8]]},
@@ -475,13 +418,22 @@ sns.jointplot(data=data, x='x', y='z', hue='tag')
 sns.jointplot(data=data, x='y', y='z', hue='tag') """
 # plt.show()  # , marginal_kws=dict(bins = 160, fill= False))
 
+data = load_file('scripts/data/NGC_2477/NGC_2477_data_2021-05-10_08-02-15')
 
+# print(data)
 
+uni = stats.uniform(0,10)
+nor = stats.norm(5,1)
+umix = .8
+nmix = .2
+scale = 1000
 
-""" TESTING COORDS
-data = load_file(
-    "/home/simon/repos/opencluster/scripts/data/NGC_2477/NGC_2477_data_2021-05-10_08-02-15")
-data = data[['ra', 'dec', 'parallax']].to_pandas().to_numpy()
-coords = polar_to_cartesian(data)
-c2 = cartesian_to_polar(coords)
-"""
+unidata = uni.rvs(int(umix*scale))
+nordata = nor.rvs(int(nmix*scale))
+data = np.concatenate([unidata, nordata])
+norprob = nor.pdf(data)*nmix
+uniprob = uni.pdf(data)*umix
+norprob = norprob/(uniprob+norprob)
+uniprob = 1. - norprob
+data = np.vstack((data, uniprob, norprob)).T
+print(data)
