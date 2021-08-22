@@ -228,25 +228,6 @@ def truncated_gumbel(lock, scale, low, high, n):
     y = np.random.rand(n)*(rv_limits[1] - rv_limits[0]) + rv_limits[0]
     return stats.gumbel_r.ppf(y, lock, scale)
 
-
-# TODO: make faster: instead of line modifying sampling range, line modifies the results directly.
-""" def plx_error(w0, wl, wf, n, y0=None, x0=None, plx=None):
-    n = plx.shape[0]
-    err = np.zeros_like(plx)
-    table = np.vstack((plx, err)).T
-    below_zero = table[table[:, 0] <= 0, 0]
-    if plx is not None and y0 and x0 and below_zero.shape[0]:
-        table[table[:, 0] > 0, 1] = EDSD(a=0, b=wf).rvs(
-            wl, w0, wf, size=(n - below_zero.shape[0]))
-        err_low = -y0 / abs(x0 - below_zero.min()) * below_zero
-        err_below_zero = np.apply_along_axis(
-            lambda x: EDSD(a=x[0], b=wf).rvs(wl, w0, wf, 1),
-            axis=1, arr=np.expand_dims(err_low, 1)).flatten()
-        table[table[:, 0] <= 0, 1] = err_below_zero
-        return table[:, 1]
-    else:
-        return EDSD(a=0, b=wf).rvs(wl, w0, wf, size=n) """
-
 # Data generators
 @attrs(auto_attribs=True)
 class Cluster:
@@ -278,8 +259,7 @@ class Cluster:
 @attrs(auto_attribs=True)
 class Field:
     space: stats._multivariate.multi_rv_frozen = attrib(
-        validator=[ validators.instance_of(stats._multivariate.multi_rv_frozen), dist_has_n_dimensions(n=2) ])
-    plx: stats.rv_continuous = attrib(validator=validators.instance_of(stats.rv_continuous))
+        validator=[ validators.instance_of(stats._multivariate.multi_rv_frozen), dist_has_n_dimensions(n=3)])
     pm: stats._multivariate.multi_rv_frozen = attrib(
         validator=[validators.instance_of(stats._multivariate.multi_rv_frozen), dist_has_n_dimensions(n=2)])
     representation_type: str= attrib(
@@ -292,17 +272,15 @@ class Field:
     def rvs(self):
         size = self.star_count
         data = pd.DataFrame()
-        ra_dec = self.space.rvs(size)
+        xyz = self.space.rvs(size)
         pm = self.pm.rvs(size)
         data[['pmra', 'pmdec']] = pd.DataFrame(
                 np.vstack((pm[:, 0], pm[:, 1])).T)
-        plx = self.plx.rvs(size)
-        ra_dec_plx = np.vstack((ra_dec[:,0], ra_dec[:,1], plx)).T
-        if self.representation_type == 'cartesian':
-            xyz = polar_to_cartesian(ra_dec_plx)
-            data[['x', 'y', 'z']] = pd.DataFrame(xyz)
-        else:
+        if self.representation_type == 'spherical':
+            ra_dec_plx = cartesian_to_polar(xyz)
             data[['ra', 'dec', 'parallax']] = pd.DataFrame(ra_dec_plx)
+        else:
+            data[['x', 'y', 'z']] = pd.DataFrame(xyz)
         return data
 
 
