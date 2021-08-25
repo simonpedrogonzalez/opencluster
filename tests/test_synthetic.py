@@ -8,6 +8,7 @@ import pytest
 class Ok:
     pass
 
+# TODO: unused
 class TestEDSD:
     def test_EDSD_argv_check(self):
         # needs more checks!!!
@@ -17,12 +18,12 @@ class TestEDSD:
     def test_EDSD_pdf_cdf(self):
         # calculate pdf for 100 points, integrate
         # calculate cdf, compare cdf with pdf integral
-        assert True
+        assert False
 
     def test_EDSD_cdf_ppf(self):
         # calculate y = cdf(x0) for 100 points
         # calculate x1 = ppf(y), compare x0 and x1 for minimal error
-        assert True
+        assert False
 
     def test_EDSD_rvs(self):
         sample = EDSD(wl=1.1, w0=-.15, wf=4.1).rvs(size=100)
@@ -40,6 +41,7 @@ class TestHelpers:
         polar = cartesian_to_polar(cartesian)
         assert np.allclose(cartesian, polar_to_cartesian(polar))
 
+    # TODO: unused
     def test_uniform_circle(self):
         center = np.random.uniform(size=2)
         radius = np.random.uniform()
@@ -69,13 +71,14 @@ class TestHelpers:
         dz = np.abs(data[:,2]-center[2])
         assert data[np.sqrt(dx**2 + dy**2 + dz**2) > radius].shape[0] == 0
         assert data[~is_inside_circle(center, radius, data)].shape[0] == 0
-        k = 2 * radius / math.sqrt(3)
+        k = radius / math.sqrt(3)
         cube = data[(dx <= k) & (dy <= k) & (dz <= k)]
         sx, sy, sz = cube[:,0], cube[:,1], cube[:,2]
         assert kstest(sx, 'uniform', args=(sx.min(), sx.max() - sx.min())).pvalue > .05
         assert kstest(sy, 'uniform', args=(sy.min(), sy.max() - sy.min())).pvalue > .05
         assert kstest(sz, 'uniform', args=(sz.min(), sz.max() - sz.min())).pvalue > .05
 
+# TODO: update
 class TestField:
     @pytest.mark.parametrize(
         'plx, space, pm, star_count, representation_type, test', [
@@ -120,6 +123,7 @@ class TestField:
         assert field_data.shape == (int(1e5), 5)
         assert sorted(list(field_data.columns)) == sorted(['x', 'y', 'z', 'pmra', 'pmdec'])
 
+# TODO: update
 class TestCluster:
     @pytest.mark.parametrize(
         'space, pm, star_count, representation_type, test',
@@ -161,24 +165,10 @@ class TestCluster:
         assert cluster_data.shape == (100, 5)
         assert sorted(list(cluster_data.columns)) == sorted(['x', 'y', 'z', 'pmra', 'pmdec'])
 
+# TODO
 class TestSynthetic:
     def test_attrs(self):
         assert False
 
     def test_rvs(self):
         assert False
-
-class TestCrop:
-    def test_draw_3Dcontour(self):
-        # generate gaussian 3d data
-        # draw shape
-        # assert data in sphere
-        # assert at least one point in ellipse border
-        assert True
-    
-    def test_draw_2Dcontour(self):
-        # generate gaussian 2d data
-        # draw shape (ellipse)
-        # assert data in ellipse
-        # assert at least one point in ellipse border
-        assert True

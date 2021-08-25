@@ -19,26 +19,56 @@ import math
 from astropy.coordinates import Distance, SkyCoord
 import astropy.units as u
 
-# np.seterr(over='raise')
-# np.seterr(invalid='raise')
-# np.seterr(invalid='divide')
+# Helper functions
+def is_inside_circle(center, radius, data):
+    dx = np.abs(data[:,0]-center[0])
+    dy = np.abs(data[:,1]-center[1])
+    return (dx < radius) & (dy < radius) & ((dx + dy <= radius) | (dx**2 + dy**2 <= radius**2))
+
+def is_inside_sphere(center, radius, data):
+    dx = np.abs(data[:,0]-center[0])
+    dy = np.abs(data[:,1]-center[1])
+    dz = np.abs(data[:,2]-center[2])
+    return dx**2 + dy**2 + dz**2 <= radius**2
 
 # Coordinate transformation
+# TODO: change to take three arrays or numbers as input
 def cartesian_to_polar(coords):
-    coords = SkyCoord(
-        x=coords[:, 0], y=coords[:, 1], z=coords[:, 2],
-        unit='pc', representation_type='cartesian', frame='icrs'
-    )
-    coords.representation_type = 'spherical'
-    return np.vstack((coords.ra.deg, coords.dec.deg, coords.distance.parallax.mas)).T
+    coords = np.array(coords)
+    if len(coords.shape) == 1:
+        coords = SkyCoord(
+            x=coords[0], y=coords[1], z=coords[2],
+            unit='pc', representation_type='cartesian', frame='icrs'
+        )
+        coords.representation_type = 'spherical'
+        return np.array([coords.ra.deg, coords.dec.deg, coords.distance.parallax.mas])
+    else:
+        coords = SkyCoord(
+            x=coords[:,0], y=coords[:,1], z=coords[:,2],
+            unit='pc', representation_type='cartesian', frame='icrs'
+        )
+        coords.representation_type = 'spherical'
+        return np.vstack((coords.ra.deg, coords.dec.deg, coords.distance.parallax.mas)).T
 
+# TODO: change to take three arrays or numbers as input
 def polar_to_cartesian(coords):
-    coords = SkyCoord(
-        ra=coords[:, 0]*u.degree, dec=coords[:, 1]*u.degree, distance=Distance(parallax=coords[:, 2]*u.mas),
-        representation_type='spherical', frame='icrs'
-    )
-    coords.representation_type = 'cartesian'
-    return np.vstack((coords.x.value, coords.y.value, coords.z.value)).T
+    coords = np.array(coords)
+    if len(coords.shape) == 1:
+        coords = SkyCoord(
+            ra=coords[0]*u.degree, dec=coords[1]*u.degree,
+            distance=Distance(parallax=coords[2]*u.mas),
+            representation_type='spherical', frame='icrs'
+        )
+        coords.representation_type = 'cartesian'
+        return np.array([coords.x.value, coords.y.value, coords.z.value])
+    else:
+        coords = SkyCoord(
+            ra=coords[:,0]*u.degree, dec=coords[:,1]*u.degree,
+            distance=Distance(parallax=coords[:,2]*u.mas),
+            representation_type='spherical', frame='icrs'
+        )
+        coords.representation_type = 'cartesian'
+        return np.vstack((coords.x.value, coords.y.value, coords.z.value)).T
 
 # Custom validators
 def in_range(min_value, max_value):
@@ -85,16 +115,6 @@ class EDSD(stats.rv_continuous):
             lambda x: wl**3/(2*(x-w0))**4 * np.exp(-wl/(x-w0))
         ])
 
-    """  def _simple_ppf(self, y, wl, w0, wf):
-        return (
-            .1 +
-            w0 + .4*y**4 +
-            2*wl /
-            (((np.log10(
-                -5/4*np.log10(1.-y))
-                - 3)**2)
-                - 6)
-        ) """
 
     def _ppf(self, y, wl, w0, wf):
         return (
@@ -132,32 +152,6 @@ class EDSD(stats.rv_continuous):
             if np.isclose(self.a, wf):
                 raise ValueError('a must be < than wf')
         return True
-
-    """ def check_ppf_error(self, wl, w0, wf):
-        x = np.linspace(w0, wf, 10000)
-        fig, ax = plt.subplots(2, sharex=True)
-        y_correcto = self._cdf(x, wl, w0, wf)
-        y_pdf = self._pdf(x, wl, w0, wf)
-        xy = np.vstack((x, y_correcto, y_pdf)).T
-        # remove problematic points
-        xy = xy[xy[:, 1] < 0.9985]
-        x = xy[:, 0]
-        y_correcto = xy[:, 1]
-        y_pdf = xy[:, 2]
-        ax[0].plot(x, y_correcto, label='cdf')
-        ax[0].plot(x, y_pdf, label='pdf')
-
-        x_aprox = self._ppf(y_correcto, wl, w0, wf)
-        ax[0].plot(x_aprox, y_correcto, label='fast ppf aprox')
-        ax[0].legend()
-
-        y_aprox = self._cdf(x_aprox, wl, w0, wf)
-        err = (y_aprox - y_correcto)**2
-        ax[1].plot(x, err, label='err')
-        ax[1].plot(x, np.zeros_like(x), '--')
-        ax[1].plot(x, np.ones_like(x)*.0005, '--')
-        plt.setp(ax, xlim=(w0, wf))
-        plt.show() """
 
     def rvs(self, size: int=1):
         wl, w0, wf = self.wl, self.w0, self.wf
@@ -197,6 +191,14 @@ class UniformSphere(stats._multivariate.multi_rv_frozen):
         z = r * np.cos(theta) + self.center[2]
         return np.vstack((x, y, z)).T
 
+    # TODO: test
+    def pdf(self, x: list):
+        is_inside = is_inside_sphere(self.center, self.radius, x)
+        res = np.array(is_inside, dtype=float)
+        res[res > 0] = 1./(4./3.*np.pi*self.radius**3)
+        return res
+
+
 @attrs(auto_attribs=True)
 class UniformCircle(stats._multivariate.multi_rv_frozen):
     center: Tuple[float,float] = attrib(validator=[
@@ -214,19 +216,6 @@ class UniformCircle(stats._multivariate.multi_rv_frozen):
         x = r * np.cos(theta) + self.center[0]
         y = r * np.sin(theta) + self.center[1]
         return np.vstack((x, y)).T
-
-
-def skewnorm(a, loc, scale, n):
-    y = stats.skewnorm.rvs(a, loc, scale, n)
-    df = pd.DataFrame(y)
-    df.columns = ['plx']
-    return df
-
-def truncated_gumbel(lock, scale, low, high, n):
-    rv_limits = (stats.gumbel_r.cdf(low, lock, scale),
-                 stats.gumbel_r.cdf(high, lock, scale))
-    y = np.random.rand(n)*(rv_limits[1] - rv_limits[0]) + rv_limits[0]
-    return stats.gumbel_r.ppf(y, lock, scale)
 
 # Data generators
 @attrs(auto_attribs=True)
@@ -255,6 +244,16 @@ class Cluster:
         data[['pmra', 'pmdec']] = pd.DataFrame(pm)
         return data
 
+    # test
+    def pdf(self, data):
+        pm_pdf = self.pm.pdf(data[['pmra', 'pmdec']].to_numpy())
+        if set(['x', 'y', 'z']).issubset(set(data.columns)):
+            space_pdf = self.space.pdf(data[['x' ,'y', 'z']].to_numpy())
+        else:
+            xyz = polar_to_cartesian(data['ra', 'dec', 'parallax'].to_numpy())
+            space_pdf = self.space.pdf(xyz)
+        return pm_pdf*space_pdf
+
 
 @attrs(auto_attribs=True)
 class Field:
@@ -269,6 +268,7 @@ class Field:
         validator=[ validators.instance_of(int), in_range(0, 'inf') ],
         default=int(1e5))
 
+    # TODO: test
     def rvs(self):
         size = self.star_count
         data = pd.DataFrame()
@@ -283,6 +283,16 @@ class Field:
             data[['x', 'y', 'z']] = pd.DataFrame(xyz)
         return data
 
+    # TODO: test
+    def pdf(self, data):
+        pm_pdf = self.pm.pdf(data[['pmra', 'pmdec']].to_numpy())
+        if set(['x', 'y', 'z']).issubset(set(data.columns)):
+            space_pdf = self.space.pdf(data[['x' ,'y', 'z']].to_numpy())
+        else:
+            xyz = polar_to_cartesian(data['ra', 'dec', 'parallax'].to_numpy())
+            space_pdf = self.space.pdf(xyz)
+        return pm_pdf*space_pdf
+
 
 @attrs(auto_attribs=True)
 class Synthetic:
@@ -291,127 +301,49 @@ class Synthetic:
         member_validator=validators.instance_of(Cluster)
         ))
 
+    # TODO: test
     def rvs(self):
-        self.field.representation_type = 'spherical'
-        field_data = self.field.rvs()
-        field_data['label'] = pd.DataFrame(np.zeros(field_data.shape[0], dtype=int))
+        self.field.representation_type = 'cartesian'
+        data = self.field.rvs()
         for i in range(len(self.clusters)):
-            label = i+1
-            self.clusters[i].representation_type = 'spherical'
+            self.clusters[i].representation_type = 'cartesian'
             cluster_data = self.clusters[i].rvs()
-            idx = (field_data['parallax'] >= cluster_data['parallax'].min()) & (field_data['parallax'] <= cluster_data['parallax'].max())
-            data_columns = ['ra', 'dec', 'pmra', 'pmdec']
-            for column in data_columns:
-                idx = idx & (field_data[column] >= cluster_data[column].min()) & (field_data[column] <= cluster_data[column].max())
-            
-            # TODO: check for every x in field[idx] if 
-            # A: is_from_distribution(polar_to_cartesian(x['ra', 'dec', 'parallax']),
-            #   multivariate_normal(polar_to_cartesian(cluster_center), cluster_cov))
-            # and B: is_from_distribution(x['pmra', 'pmdec'], multivariate_normal(cluster_pm_center, cluster_pm_cov))
-            # then eliminate x from field
-
-            field_data.drop(field_data[idx].index, inplace=True)
-            cluster_data['label'] = pd.DataFrame(np.ones(cluster_data.shape[0], dtype=int)*label)
-            field_data = pd.concat([field_data, cluster_data], axis=0)
-
-        return field_data
-
-def is_from_dist(cdf: Callable, x, *args, **kwargs):
-    return np.isclose(cdf(x, args, kwargs), np.zeros_like(x)) 
+            data = pd.concat([data, cluster_data], axis=0)
         
-def is_inside_circle(center, radius, data):
-    dx = np.abs(data[:,0]-center[0])
-    dy = np.abs(data[:,1]-center[1])
-    return (dx < radius) & (dy < radius) & ((dx + dy <= radius) | (dx**2 + dy**2 <= radius**2))
-
-def is_inside_sphere(center, radius, data):
-    dx = np.abs(data[:,0]-center[0])
-    dy = np.abs(data[:,1]-center[1])
-    dz = np.abs(data[:,2]-center[2])
-    return (dx < radius) & (dy < radius) & ((dx + dy + dz <= radius) | (dx**2 + dy**2 + dx**2 <= radius**2))
-
-
-""" center = (0,0,0)
-radius = 1.
-size = 1000000
-data = UniformSphere(center, radius).rvs(size)
-dx = np.abs(data[:,0]-center[0])
-dy = np.abs(data[:,1]-center[1])
-dz = np.abs(data[:,2]-center[2])
-tag = np.zeros(data.shape[0])
+        # TODO: improve
+        total_stars = sum([c.star_count for c in self.clusters]) + self.field.star_count
+        field_mixing_ratio = float(self.field.star_count)/float(total_stars)
+        field_p = self.field.pdf(data)*field_mixing_ratio
+        clusters_mixing_ratios = [float(c.star_count)/float(total_stars) for c in self.clusters]
+        cluster_ps = np.array([self.clusters[i].pdf(data)*clusters_mixing_ratios[i] for i in range(len(self.clusters))])
+        total_p = cluster_ps.sum(axis=0) + field_p
+        total_clusters_probs = 0
+        for i in range(len(self.clusters)):
+            data[f'p_cluster{i+1}'] = cluster_ps[i]/total_p
+            total_clusters_probs += cluster_ps[i]/total_p
+        data['p_field'] = 1 - total_clusters_probs
+        return data
 
 
-k = radius / math.sqrt(3)
-cube = data[(dx <= k) & (dy <= k) & (dz <= k)]
-sx, sy, sz = cube[:,0], cube[:,1], cube[:,2]
-
-tag[(dx <= k) & (dy <= k) & (dz <= k)] = 1
-# data[np.sqrt(dx**2 + dy**2 + dx**2) > radius]
-
-stats.kstest(sx, 'uniform', args=(sx.min(), sx.max() - sx.min())).pvalue > .05
-stats.kstest(sy, 'uniform', args=(sy.min(), sy.max() - sy.min())).pvalue > .05
-stats.kstest(sz, 'uniform', args=(sz.min(), sz.max() - sz.min())).pvalue > .05
-
-fig = plt.figure()
-ax = fig.add_subplot(111, projection = '3d')
-data = pd.DataFrame({"x": data[:,0].T, "y": data[:,1].T, 'z': data[:,2].T, "label": tag})
-groups = data.groupby("label")
-
-for name, group in groups:
-    if name == 0:
-        ax.scatter(group['x'], group['y'], group['z'], label=name)
-plt.show()
-print()
-
-rt = 'spherical'
+""" rt = 'spherical'
 field = Field(
-    plx=EDSD(a=0, w0=1, wl=2, wf=12),
-    pm=stats.multivariate_normal(mean=(0., 0.), cov=10),
-    space=UniformCircle(center=(120.5, -27.5), radius=5),
+    pm=stats.multivariate_normal(mean=(0., 0.), cov=3),
+    # space=UniformSphere(center=polar_to_cartesian((120.5, -27.5, 5)), radius=700),
+    space=UniformSphere(center=polar_to_cartesian((120.5, -27.5, 5)), radius=3),
     representation_type=rt,
-    star_count=int(1e4)
-)# .rvs()
-# field_data['tag'] = pd.DataFrame(np.zeros((int(1e3),)))
- """
-""" cluster = Cluster(
-    pm_params={'means': (-2.4, 2), 'cov': [[.3, 0], [0, .3]]},
-    space_params={'means':(121.5, -26.5, 3), 'cov':[[.8, 0, 0], [0, .8, 0], [0, 0, .8]]},
+    star_count=int(60)
+)
+cluster = Cluster(
+    space=stats.multivariate_normal(
+        mean=polar_to_cartesian([120.7, -28.5, 5]),
+        cov=[[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    ),
+    pm=stats.multivariate_normal(mean=(.5, .5), cov=.5),
     representation_type=rt,
-    star_count=200
-) """# .rvs()
-
-""" sample = Sample(field, [cluster]).rvs()
-
-cluster_data['tag'] = pd.DataFrame(np.ones((2000,)))
-data = pd.concat([field_data, cluster_data], axis=0) """
-# data = cluster_data
-# print('drawing graphs')
-# sns.jointplot(data=data, x='parallax', y='parallax_error', hue='tag')
-# sns.jointplot(data=data, x='pmra', y='pmra_error', hue='tag')
-# sns.jointplot(data=data, x='pmdec', y='pmdec_error', hue='tag')
-""" sns.jointplot(data=data, x='ra', y='dec', hue='tag')
-sns.jointplot(data=data, x='parallax', y='ra', hue='tag') """
-""" sns.jointplot(data=data, x='x', y='y', hue='tag')
-sns.jointplot(data=data, x='x', y='z', hue='tag')
-sns.jointplot(data=data, x='y', y='z', hue='tag') """
-# plt.show()  # , marginal_kws=dict(bins = 160, fill= False))
-
-data = load_file('scripts/data/NGC_2477/NGC_2477_data_2021-05-10_08-02-15')
-
-# print(data)
-
-uni = stats.uniform(0,10)
-nor = stats.norm(5,1)
-umix = .8
-nmix = .2
-scale = 1000
-
-unidata = uni.rvs(int(umix*scale))
-nordata = nor.rvs(int(nmix*scale))
-data = np.concatenate([unidata, nordata])
-norprob = nor.pdf(data)*nmix
-uniprob = uni.pdf(data)*umix
-norprob = norprob/(uniprob+norprob)
-uniprob = 1. - norprob
-data = np.vstack((data, uniprob, norprob)).T
-print(data)
+    star_count=40
+)
+synthetic = Synthetic(field=field, clusters=[cluster])
+data = synthetic.rvs()
+data[['ra', 'dec', 'parallax']] = cartesian_to_polar(data[['x', 'y', 'z']].to_numpy())
+sns.scatterplot(data=data, x='ra', y='dec', hue='p_cluster1')
+plt.show() """
