@@ -300,6 +300,9 @@ class Synthetic:
     clusters: List[Cluster] = attrib(validator=validators.deep_iterable(
         member_validator=validators.instance_of(Cluster)
         ))
+    representation_type: str= attrib(
+        validator=validators.in_(['cartesian', 'spherical']),
+        default='spherical')
 
     # TODO: test
     def rvs(self):
@@ -322,6 +325,10 @@ class Synthetic:
             data[f'p_cluster{i+1}'] = cluster_ps[i]/total_p
             total_clusters_probs += cluster_ps[i]/total_p
         data['p_field'] = 1 - total_clusters_probs
+        if self.representation_type == 'spherical':
+            xyz = data[['x', 'y', 'z']]
+            data[['ra', 'dec', 'parallax']] = pd.DataFrame(cartesian_to_polar(xyz))
+            data['log_parallax'] = np.log10(data['parallax'])
         return data
 
 
