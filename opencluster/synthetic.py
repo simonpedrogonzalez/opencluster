@@ -237,7 +237,7 @@ class Cluster:
         data = pd.DataFrame()
         xyz = self.space.rvs(size)
         if self.representation_type == 'spherical':
-            data[['ra', 'dec', 'parallax']] = pd.DataFrame(cartesian_to_polar(xyz))
+            data['ra'], data['dec'], data['parallax'] = cartesian_to_polar(xyz).T
         else:
             data[['x', 'y', 'z']] = pd.DataFrame(xyz)
         pm = self.pm.rvs(size)
@@ -326,8 +326,8 @@ class Synthetic:
             total_clusters_probs += cluster_ps[i]/total_p
         data['p_field'] = 1 - total_clusters_probs
         if self.representation_type == 'spherical':
-            xyz = data[['x', 'y', 'z']]
-            data[['ra', 'dec', 'parallax']] = pd.DataFrame(cartesian_to_polar(xyz))
+            xyz = data[['x', 'y', 'z']].to_numpy()
+            data['ra'], data['dec'], data['parallax'] = cartesian_to_polar(xyz).T
             data['log_parallax'] = np.log10(data['parallax'])
         return data
 
