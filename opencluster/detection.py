@@ -20,6 +20,10 @@ import copy
 import math
 from astropy.coordinates import Distance, SkyCoord
 import astropy.units as u
+from skimage.feature import peak_local_max
+from statsmodels.robust.scale import huber, hubers_scale
+from astropy.stats import biweight_location, biweight_scale, mad_std
+from astropy.stats.sigma_clipping import sigma_clipped_stats
 
 def convolve(data, mask: np.ndarray=None, c_filter: callable=None, *args, **kwargs):
     if c_filter:
@@ -44,19 +48,32 @@ class FindClusterResult:
 def location_estimator(data):
     return np.median(data, axis=0)
 
-def find_peaks(image, mask, treshold):
+def find_peaks(image, mask, threshold):
     local_max = ndimage.maximum_filter(image, footprint=mask)
-    peaks = ((local_max==image) & (image >= treshold))
+    peaks = ((local_max==image) & (image >= threshold))
     return peaks
 
+def robust_sigma_clipping(data, *args, **kwargs):
+    median = np.inf
+    new_median = np.median(data)
+    while not np.isclose(median,newmedian):  
+        median = new_median
+        _, new_median, std = sigma_clipped_stats(data, cenfunc='median', stdfunc='mad_std', *args, **kwargs)
+    retrun (median, std)
 
-def find_cluster(data, bin_size, treshold=50, *args, **kwargs):
+def find_cluster(data, bin_size, test, threshold=50, max_cluster_count=np.inf, *args, **kwargs):
     dim = data.shape[1]
     # TODO: check bin_size and data shapes
     hist, edges = histogram(data, bin_size)
     smoothed = convolve(hist, *args, **kwargs)
     sharp = hist - smoothed
-    peaks = find_peaks(sharp, np.ones([3]*dim), treshold)
+    clusters_idx = peak_local_max(sharp, min_distance=1,
+        threshold_abs=threshold, exclude_border=True,
+        num_peaks=max_cluster_count)
+    clusters_star_count = sharp[tuple(clusters_idx.T)]
+    clusters_mask = np.zeros_like(hist)
+    clusters_mask[tuple(clusters_idx.T)] = 1
+    
     max_bin = np.ravel(np.where(sharp == sharp.max()))
     max_edges = [[edges[i][max_bin[i]], edges[i][min(max_bin[i]+1, edges[i].shape[0])]] for i in range(dim)]
     initial_max_params = [edges[i][max_bin[i]] + bin_size[i]/2 for i in range(dim)]
@@ -65,6 +82,7 @@ def find_cluster(data, bin_size, treshold=50, *args, **kwargs):
     subset_limits = [[max_edges[i][0] - bin_size[i], max_edges[i][1] + bin_size[i]] for i in range(dim)]
     # taking no extra bins
     # subset_limits = max_edges
+    subset = np.vstack((subset.T, test)).T
     for i in range(dim):
         subset = subset[(subset[:,i] >= subset_limits[i][0]) & (subset[:,i] <= subset_limits[i][1])]
     max_center = location_estimator(subset)
@@ -120,14 +138,14 @@ field = Field(
     pm=stats.multivariate_normal(mean=(0., 0.), cov=5),
     # space=UniformSphere(center=polar_to_cartesian((120.5, -27.5, 5)), radius=700),
     space=UniformSphere(center=polar_to_cartesian((120.5, -27.5, 5)), radius=5),
-    star_count=int(5e4)
+    star_count=int(1e4)
 )
 cluster = Cluster(
     space=stats.multivariate_normal(
         mean=polar_to_cartesian([120.7, -28.5, 5]),
         cov=.01
     ),
-    pm=stats.multivariate_normal(mean=(2, 2), cov=.05),
+    pm=stats.multivariate_normal(mean=(2.1, 2.1), cov=.05),
     star_count=200
 )
 s = Synthetic(field=field, clusters=[cluster]).rvs()
@@ -163,7 +181,7 @@ mask2=np.array(
 )
 mask = mask/np.count_nonzero(mask)
 mask2 = mask2/np.count_nonzero(mask2)
-res = find_cluster(s[['pmra', 'pmdec', 'log_parallax']].to_numpy(), [.5, .5, .01], mask=mask2)
+res = find_cluster(s[['pmra', 'pmdec', 'log_parallax']].to_numpy(), [.5, .5, .01], test=s['p_cluster1'].to_numpy(), mask=mask2)
 # res = find_cluster(s[['pmra', 'pmdec', 'log_parallax']].to_numpy(), [.5, .5, .01], c_filter=ndimage.gaussian_filter, sigma=1)
 
 """ data = np.genfromtxt('data/detection_example.csv', delimiter=',', dtype="f8").reshape((20, 20, 20))
