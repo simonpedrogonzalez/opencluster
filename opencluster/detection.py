@@ -31,19 +31,20 @@ def convolve(data, mask: np.ndarray=None, c_filter: callable=None, *args, **kwar
     if mask is not None:
         return ndimage.convolve(data, mask, *args, **kwargs)
 
-def histogram(data, bin_size: list):
-    offset = [(bin_size[i] - (data[:,i].max() - data[:,i].min()) % bin_size[i])/2 for i in range(data.shape[1])]
+def histogram(data, bin_shape: list):
+    offset = [(bin_shape[i] - (data[:,i].max() - data[:,i].min()) % bin_shape[i])/2 for i in range(data.shape[1])]
     ranges = [[data[:,i].min() - offset[i], data[:,i].max() + offset[i]] for i in range(data.shape[1])]
-    bins = [round((ranges[i][1]-ranges[i][0])/bin_size[i]) for i in range(data.shape[1])]
+    bins = [round((ranges[i][1]-ranges[i][0])/bin_shape[i]) for i in range(data.shape[1])]
     hist, edges = np.histogramdd(data, bins=bins, range=ranges, density=False)
     return hist, edges
 
 @attrs(auto_attribs=True)
 class FindClusterResult:
-    hist: np.ndarray
-    edges: list
-    max_bin: np.ndarray
-    max_center: np.ndarray        
+    locs: np.ndarray
+    stds: np.ndarray
+    star_counts: np.ndarray
+    heatmaps=None
+    kdeplots=None
 
 def location_estimator(data):
     return np.median(data, axis=0)
@@ -53,45 +54,101 @@ def find_peaks(image, mask, threshold):
     peaks = ((local_max==image) & (image >= threshold))
     return peaks
 
-def robust_sigma_clipping(data, *args, **kwargs):
-    median = np.inf
-    new_median = np.median(data)
-    while not np.isclose(median,newmedian):  
-        median = new_median
-        _, new_median, std = sigma_clipped_stats(data, cenfunc='median', stdfunc='mad_std', *args, **kwargs)
-    retrun (median, std)
+def create_heatmaps(hist, edges, bin_shape, clusters_idx):
+    dim = len(hist.shape)
+    labels = [(np.round(edges[i]+bin_shape[i]/2, 2))[:-1] for i in range(dim)]
+    if dim == 2:
+        data = hist
+        annot_idx = clusters_idx
+        annot = np.ndarray(shape=data.shape, dtype=str).tolist()
+        for i in range(annot_idx.shape[1]):
+            annot[annot_idx[0,i]][annot_idx[1,i]] = str(round(data[annot_idx[0][i]][annot_idx[1][i]]))
+        ax = sns.heatmap(data, annot=annot, fmt='s', yticklabels=labels[0], xticklabels=labels[1])
+        hlines = np.concatenate((annot_idx[0], annot_idx[0]+1))
+        vlines = np.concatenate((annot_idx[1], annot_idx[1]+1))
+        ax.hlines(hlines, *ax.get_xlim(), color='w')
+        ax.vlines(vlines, *ax.get_ylim(), color='w')
+    else:
+        cuts = np.unique(clusters_idx[2])
+        ncuts = cuts.size
+        ncols = min(2, ncuts)
+        nrows = math.ceil(ncuts/ncols)
+        delete_last = nrows>ncuts/ncols
+        fig, ax = plt.subplots(ncols=ncols, nrows=nrows)
+        for row in range(nrows):
+            for col in range(ncols):
+                idx = col*nrows+row
+                if idx < cuts.size:
+                    cut_idx = cuts[idx]
+                    data = hist[:,:,cut_idx]
+                    annot_idx = clusters_idx.T[(clusters_idx.T[:,2] == cut_idx)].T[:2]
+                    annot = np.ndarray(shape=data.shape, dtype=str).tolist()
+                    for i in range(annot_idx.shape[1]):
+                        annot[annot_idx[0,i]][annot_idx[1,i]] = str(round(data[annot_idx[0][i]][annot_idx[1][i]]))
+                    if ncuts <= 1:
+                        subplot = ax
+                    else:
+                        if nrows == 1:
+                            subplot = ax[col]
+                        else:
+                            subplot = ax[row, col]
+                    current_ax = sns.heatmap(data, annot=annot, fmt='s', yticklabels=labels[0], xticklabels=labels[1], ax=subplot)
+                    current_ax.axes.set_xlabel("x")
+                    current_ax.axes.set_ylabel("y")
+                    current_ax.title.set_text(f'z slice at value {round(edges[2][cut_idx]+bin_shape[2]/2, 4)}') 
+                    hlines = np.concatenate((annot_idx[0], annot_idx[0]+1))
+                    vlines = np.concatenate((annot_idx[1], annot_idx[1]+1))
+                    current_ax.hlines(hlines, *current_ax.get_xlim(), color='w')
+                    current_ax.vlines(vlines, *current_ax.get_ylim(), color='w')
+        if delete_last:
+            ax.flat[-1].set_visible(False)
+        fig.subplots_adjust(wspace=.05,  hspace=.3)
+    return ax
 
-def find_cluster(data, bin_size, test, threshold=50, max_cluster_count=np.inf, *args, **kwargs):
+
+
+        
+
+def find_cluster(
+    data, bin_shape, threshold=50,
+    estimate_loc=True, max_cluster_count=np.inf,
+    heatmaps=True, kdeplots=True,
+    *args, **kwargs):
     dim = data.shape[1]
-    # TODO: check bin_size and data shapes
-    hist, edges = histogram(data, bin_size)
+    # TODO: check bin_shape and data shapes
+    hist, edges = histogram(data, bin_shape)
     smoothed = convolve(hist, *args, **kwargs)
     sharp = hist - smoothed
     clusters_idx = peak_local_max(sharp, min_distance=1,
         threshold_abs=threshold, exclude_border=True,
-        num_peaks=max_cluster_count)
-    clusters_star_count = sharp[tuple(clusters_idx.T)]
-    clusters_mask = np.zeros_like(hist)
-    clusters_mask[tuple(clusters_idx.T)] = 1
-    
-    max_bin = np.ravel(np.where(sharp == sharp.max()))
-    max_edges = [[edges[i][max_bin[i]], edges[i][min(max_bin[i]+1, edges[i].shape[0])]] for i in range(dim)]
-    initial_max_params = [edges[i][max_bin[i]] + bin_size[i]/2 for i in range(dim)]
-    subset = data
-    # taking 1 more bin in each direction, for each dimension
-    subset_limits = [[max_edges[i][0] - bin_size[i], max_edges[i][1] + bin_size[i]] for i in range(dim)]
-    # taking no extra bins
-    # subset_limits = max_edges
-    subset = np.vstack((subset.T, test)).T
+        num_peaks=max_cluster_count).T
+    locs=[]
+    stds=[]
     for i in range(dim):
-        subset = subset[(subset[:,i] >= subset_limits[i][0]) & (subset[:,i] <= subset_limits[i][1])]
-    max_center = location_estimator(subset)
+        if estimate_loc:
+            i_edges = (edges[i][clusters_idx[i]]-bin_shape[i], edges[i][clusters_idx[i]]+bin_shape[i])
+            c_loc = []
+            c_std = []
+            for c in range(clusters_idx.shape[1]):
+                subset = data[:,i]
+                subset = subset[((subset>i_edges[0][c])&(subset<i_edges[1][c]))]
+                _, median, std = sigma_clipped_stats(subset, cenfunc='median', stdfunc='mad_std', maxiters=None, sigma=1)
+                c_loc.append(median)
+                c_std.append(std)
+            locs.append(c_loc)
+            stds.append(c_std)
+        else:
+            locs.append(edges[i][clusters_idx[i]]+bin_shape[i]/2)
+            stds.append(bin_shape[i])
+    star_counts = sharp[tuple(clusters_idx)]
+
+    if heatmaps and clusters_idx.size!=0:
+        heatmaps = create_heatmaps(sharp, edges, bin_shape, clusters_idx)
     
     return FindClusterResult(
-        hist=hist,
-        edges=edges,
-        max_bin=max_bin,
-        max_center=max_center,
+        locs=np.array(locs).T,
+        stds=np.array(stds).T,
+        star_counts=star_counts
     )
     
 # TODO: should use mask, e.g.: not include center pixel. idea: use generic_filter footprint?
@@ -148,8 +205,24 @@ cluster = Cluster(
     pm=stats.multivariate_normal(mean=(2.1, 2.1), cov=.05),
     star_count=200
 )
-s = Synthetic(field=field, clusters=[cluster]).rvs()
-# histogram(s[['pmra', 'pmdec', 'log_parallax']].to_numpy(), bin_size=[.5, .5, .05])
+cluster2 = Cluster(
+    space=stats.multivariate_normal(
+        mean=polar_to_cartesian([119.7, -27.5, 4.93]),
+        cov=.01
+    ),
+    pm=stats.multivariate_normal(mean=(4.1, 4.1), cov=.05),
+    star_count=200
+)
+cluster3 = Cluster(
+    space=stats.multivariate_normal(
+        mean=polar_to_cartesian([119.7, -27.5, 5.05]),
+        cov=.01
+    ),
+    pm=stats.multivariate_normal(mean=(3.9, 3.9), cov=.05),
+    star_count=200
+)
+s = Synthetic(field=field, clusters=[cluster, cluster2, cluster3]).rvs()
+# histogram(s[['pmra', 'pmdec', 'log_parallax']].to_numpy(), bin_shape=[.5, .5, .05])
 # res = find_cluster(s[['pmra', 'pmdec', 'log_parallax']].to_numpy(), [.5, .5, .05], c_filter=ndimage.gaussian_filter, sigma=1)
 mask=np.array(
     [[[0,0,0],
@@ -179,9 +252,16 @@ mask2=np.array(
       [0,1,1,1,0],
       [0,0,1,0,0]]]
 )
+mask3 = np.array(
+    [[0,0,1,0,0],
+      [0,1,1,1,0],
+      [1,1,0,1,1],
+      [0,1,1,1,0]]
+)
 mask = mask/np.count_nonzero(mask)
 mask2 = mask2/np.count_nonzero(mask2)
-res = find_cluster(s[['pmra', 'pmdec', 'log_parallax']].to_numpy(), [.5, .5, .01], test=s['p_cluster1'].to_numpy(), mask=mask2)
+mask3 = mask3/np.count_nonzero(mask3)
+res = find_cluster(s[['pmdec', 'pmra', 'log_parallax']].to_numpy(), [.5, .5, .005], mask=mask2)
 # res = find_cluster(s[['pmra', 'pmdec', 'log_parallax']].to_numpy(), [.5, .5, .01], c_filter=ndimage.gaussian_filter, sigma=1)
 
 """ data = np.genfromtxt('data/detection_example.csv', delimiter=',', dtype="f8").reshape((20, 20, 20))
@@ -205,7 +285,7 @@ mask=np.array(mask)
 mask = mask*1
 mask = mask/np.count_nonzero(mask)
 
-find_cluster(original_data, bin_size=[.5, .5, .05], mask=mask) """
+find_cluster(original_data, bin_shape=[.5, .5, .05], mask=mask) """
 
 # test convolve
 """ filtered2 = convolve(data, mask=mask)
