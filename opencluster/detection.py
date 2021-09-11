@@ -44,7 +44,6 @@ class FindClusterResult:
     stds: np.ndarray
     star_counts: np.ndarray
     heatmaps=None
-    kdeplots=None
 
 def location_estimator(data):
     return np.median(data, axis=0)
@@ -71,10 +70,10 @@ def create_heatmaps(hist, edges, bin_shape, clusters_idx):
     else:
         cuts = np.unique(clusters_idx[2])
         ncuts = cuts.size
-        ncols = min(2, ncuts)
+        ncols = min(3, ncuts)
         nrows = math.ceil(ncuts/ncols)
         delete_last = nrows>ncuts/ncols
-        fig, ax = plt.subplots(ncols=ncols, nrows=nrows)
+        fig, ax = plt.subplots(ncols=ncols, nrows=nrows, figsize=(ncols*8,nrows*5))
         for row in range(nrows):
             for col in range(ncols):
                 idx = col*nrows+row
@@ -102,17 +101,14 @@ def create_heatmaps(hist, edges, bin_shape, clusters_idx):
                     current_ax.vlines(vlines, *current_ax.get_ylim(), color='w')
         if delete_last:
             ax.flat[-1].set_visible(False)
-        fig.subplots_adjust(wspace=.05,  hspace=.3)
+        fig.subplots_adjust(wspace=.1,  hspace=.3)
+        plt.tight_layout()
     return ax
-
-
-
-        
 
 def find_cluster(
     data, bin_shape, threshold=50,
     estimate_loc=True, max_cluster_count=np.inf,
-    heatmaps=True, kdeplots=True,
+    heatmaps=False,
     *args, **kwargs):
     dim = data.shape[1]
     # TODO: check bin_shape and data shapes
@@ -141,15 +137,15 @@ def find_cluster(
             locs.append(edges[i][clusters_idx[i]]+bin_shape[i]/2)
             stds.append(bin_shape[i])
     star_counts = sharp[tuple(clusters_idx)]
-
-    if heatmaps and clusters_idx.size!=0:
-        heatmaps = create_heatmaps(sharp, edges, bin_shape, clusters_idx)
     
-    return FindClusterResult(
+    res = FindClusterResult(
         locs=np.array(locs).T,
         stds=np.array(stds).T,
         star_counts=star_counts
     )
+    if heatmaps and clusters_idx.size!=0:
+        res.heatmaps = create_heatmaps(sharp, edges, bin_shape, clusters_idx)
+    return res
     
 # TODO: should use mask, e.g.: not include center pixel. idea: use generic_filter footprint?
 def var_filter(data, mask=None, *args, **kwargs):
@@ -261,7 +257,8 @@ mask3 = np.array(
 mask = mask/np.count_nonzero(mask)
 mask2 = mask2/np.count_nonzero(mask2)
 mask3 = mask3/np.count_nonzero(mask3)
-res = find_cluster(s[['pmdec', 'pmra', 'log_parallax']].to_numpy(), [.5, .5, .005], mask=mask2)
+res = find_cluster(s[['pmdec', 'pmra', 'log_parallax']].to_numpy(), [.5, .5, .005], mask=mask2, heatmaps=True)
+plt.show()
 # res = find_cluster(s[['pmra', 'pmdec', 'log_parallax']].to_numpy(), [.5, .5, .01], c_filter=ndimage.gaussian_filter, sigma=1)
 
 """ data = np.genfromtxt('data/detection_example.csv', delimiter=',', dtype="f8").reshape((20, 20, 20))
