@@ -3,4 +3,5 @@ scipy
 astropy
 astroquery
 pandas
+scikit-image
 Sphinx

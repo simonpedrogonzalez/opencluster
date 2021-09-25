@@ -4,7 +4,6 @@ import os
 sys.path.append(os.path.join(os.path.dirname('opencluster'), '.'))
 
 
-from opencluster.fetcher import load_file
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np

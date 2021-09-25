@@ -3,8 +3,6 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname('opencluster'), '.'))
 
-
-from opencluster.fetcher import load_file
 from opencluster.synthetic import *
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -39,7 +37,7 @@ def histogram(data, bin_shape: list):
     return hist, edges
 
 @attrs(auto_attribs=True)
-class FindClusterResult:
+class FindClustersResult:
     locs: np.ndarray
     stds: np.ndarray
     star_counts: np.ndarray
@@ -105,7 +103,7 @@ def create_heatmaps(hist, edges, bin_shape, clusters_idx):
         plt.tight_layout()
     return ax
 
-def find_cluster(
+def find_clusters(
     data, bin_shape, threshold=50,
     estimate_loc=True, max_cluster_count=np.inf,
     heatmaps=False,
@@ -115,9 +113,15 @@ def find_cluster(
     hist, edges = histogram(data, bin_shape)
     smoothed = convolve(hist, *args, **kwargs)
     sharp = hist - smoothed
-    clusters_idx = peak_local_max(sharp, min_distance=1,
-        threshold_abs=threshold, exclude_border=True,
+    # var = var_filter(hist, mask=kwargs.get('mask'))+1
+    std = std_filter(hist, mask=kwargs.get('mask'))+1
+    # var2 = np.sqrt(smoothed+var+1)
+    # normalized = sharp/snr0
+    normalized = sharp/std
+    # normalized = sharp/var2
+    clusters_idx = peak_local_max(normalized, min_distance=1, exclude_border=True,
         num_peaks=max_cluster_count).T
+
     locs=[]
     stds=[]
     for i in range(dim):
@@ -138,7 +142,7 @@ def find_cluster(
             stds.append(bin_shape[i])
     star_counts = sharp[tuple(clusters_idx)]
     
-    res = FindClusterResult(
+    res = FindClustersResult(
         locs=np.array(locs).T,
         stds=np.array(stds).T,
         star_counts=star_counts
@@ -187,7 +191,7 @@ snH4 = signal.fftconvolve(H, mask) """
 w = window3D(h)
 print(w) """
 
-field = Field(
+""" field = Field(
     pm=stats.multivariate_normal(mean=(0., 0.), cov=5),
     # space=UniformSphere(center=polar_to_cartesian((120.5, -27.5, 5)), radius=700),
     space=UniformSphere(center=polar_to_cartesian((120.5, -27.5, 5)), radius=5),
@@ -219,7 +223,7 @@ cluster3 = Cluster(
 )
 s = Synthetic(field=field, clusters=[cluster, cluster2, cluster3]).rvs()
 # histogram(s[['pmra', 'pmdec', 'log_parallax']].to_numpy(), bin_shape=[.5, .5, .05])
-# res = find_cluster(s[['pmra', 'pmdec', 'log_parallax']].to_numpy(), [.5, .5, .05], c_filter=ndimage.gaussian_filter, sigma=1)
+# res = find_clusters(s[['pmra', 'pmdec', 'log_parallax']].to_numpy(), [.5, .5, .05], c_filter=ndimage.gaussian_filter, sigma=1)
 mask=np.array(
     [[[0,0,0],
     [0,1,0],
@@ -257,9 +261,9 @@ mask3 = np.array(
 mask = mask/np.count_nonzero(mask)
 mask2 = mask2/np.count_nonzero(mask2)
 mask3 = mask3/np.count_nonzero(mask3)
-res = find_cluster(s[['pmdec', 'pmra', 'log_parallax']].to_numpy(), [.5, .5, .005], mask=mask2, heatmaps=True)
-plt.show()
-# res = find_cluster(s[['pmra', 'pmdec', 'log_parallax']].to_numpy(), [.5, .5, .01], c_filter=ndimage.gaussian_filter, sigma=1)
+res = find_clusters(s[['pmdec', 'pmra', 'log_parallax']].to_numpy(), [.5, .5, .005], mask=mask2, heatmaps=True)
+plt.show() """
+# res = find_clusters(s[['pmra', 'pmdec', 'log_parallax']].to_numpy(), [.5, .5, .01], c_filter=ndimage.gaussian_filter, sigma=1)
 
 """ data = np.genfromtxt('data/detection_example.csv', delimiter=',', dtype="f8").reshape((20, 20, 20))
 filtered = np.genfromtxt('data/detection_example_filtered.csv', delimiter=',', dtype="f8").reshape((20, 20, 20))
@@ -282,10 +286,9 @@ mask=np.array(mask)
 mask = mask*1
 mask = mask/np.count_nonzero(mask)
 
-find_cluster(original_data, bin_shape=[.5, .5, .05], mask=mask) """
+find_clusters(original_data, bin_shape=[.5, .5, .05], mask=mask) """
 
 # test convolve
 """ filtered2 = convolve(data, mask=mask)
 variance2 = ndimage.generic_filter(data, function=np.var, size=(5,5,5))
 variance = convolve(data, c_filter=ndimage.generic_filter, function=np.var, size = (5,5,5)) """
-print('coso')
