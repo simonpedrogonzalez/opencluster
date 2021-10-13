@@ -26,11 +26,6 @@ from hdbscan import HDBSCAN, all_points_membership_vectors
 from sklearn.preprocessing import RobustScaler
 from sklearn.manifold import TSNE
 
-def subset(data: np.ndarray, limits: list):
-    for i in range(len(limits)):
-        data = data[(data[:,i] > limits[i][0]) & (data[:,i] < limits[i][1])]
-    return data
-
 def kde(data):
     return data
 

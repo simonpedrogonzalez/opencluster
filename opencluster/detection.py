@@ -3,7 +3,7 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname('opencluster'), '.'))
 
-from opencluster.synthetic import *
+from opencluster.utils import *
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
@@ -23,33 +23,73 @@ from statsmodels.robust.scale import huber, hubers_scale
 from astropy.stats import biweight_location, biweight_scale, mad_std
 from astropy.stats.sigma_clipping import sigma_clipped_stats
 
+def default_mask(dim: int):
+    indexes = np.array(np.meshgrid(*np.tile(np.arange(5), (dim, 1)))).T.reshape((-1, dim))
+    mask = np.zeros([5]*dim)
+    cond = np.sum((indexes-2)**2, axis=1)
+    mask[tuple(indexes[np.argwhere((cond>0)&(cond<5))].reshape((-1, dim)).T)] = 1
+    return mask/np.count_nonzero(mask)
+
 def convolve(data, mask: np.ndarray=None, c_filter: callable=None, *args, **kwargs):
     if c_filter:
         return c_filter(data, *args, **kwargs)
     if mask is not None:
         return ndimage.convolve(data, mask, *args, **kwargs)
 
-def histogram(data, bin_shape: list):
-    offset = [(bin_shape[i] - (data[:,i].max() - data[:,i].min()) % bin_shape[i])/2 for i in range(data.shape[1])]
-    ranges = [[data[:,i].min() - offset[i], data[:,i].max() + offset[i]] for i in range(data.shape[1])]
-    bins = [round((ranges[i][1]-ranges[i][0])/bin_shape[i]) for i in range(data.shape[1])]
+def histogram(data, bin_shape: list, nyquist_offset: list=None):
+    dim = data.shape[1]
+    offset = [(bin_shape[i] - (data[:,i].max() - data[:,i].min()) % bin_shape[i])/2 for i in range(dim)]
+    ranges = [[data[:,i].min() - offset[i], data[:,i].max() + offset[i]] for i in range(dim)]
+    if nyquist_offset is not None:
+        ranges = [[ranges[i][0]+nyquist_offset[i], ranges[i][1]+nyquist_offset[i]] for i in range(dim)]
+    bins = [round((ranges[i][1]-ranges[i][0])/bin_shape[i]) for i in range(dim)]
     hist, edges = np.histogramdd(data, bins=bins, range=ranges, density=False)
     return hist, edges
 
+def nyquist_offsets(bin_shape: list):
+    dim = len(bin_shape)
+    values = np.vstack((np.array(bin_shape)/2, np.zeros(dim))).T
+    combinations = np.array(np.meshgrid(*values)).T.reshape((-1,dim))
+    return np.flip(combinations, axis=0)
+
+@attrs(auto_attribs=True)
+class Peak():
+    index: np.ndarray
+    significance: float
+    star_count: float
+    center: np.ndarray
+    sigma: np.ndarray
+
+    def is_in_neighbourhood(self, b):
+        return not np.any(np.abs(self.index-b.index) > 1)
+
 @attrs(auto_attribs=True)
 class FindClustersResult:
-    locs: np.ndarray
-    stds: np.ndarray
-    star_counts: np.ndarray
+    peaks: list=[]
     heatmaps=None
 
 def location_estimator(data):
     return np.median(data, axis=0)
 
-def find_peaks(image, mask, threshold):
-    local_max = ndimage.maximum_filter(image, footprint=mask)
-    peaks = ((local_max==image) & (image >= threshold))
-    return peaks
+def best_peaks(peaks: list):
+    bests = [peaks[0]]
+    peaks = peaks[1:]
+    while len(peaks) > 0:
+        peak = peaks.pop()
+        i = 0
+        while(i < len(bests)):
+            if bests[i].is_in_neighbourhood(peak):
+                if bests[i].significance < peak.significance:
+                    bests[i] = peak
+                    print('changed')
+                break
+            i+=1
+        if i == len(bests):
+            bests.append(peak)
+    return bests
+
+            
+    
 
 def create_heatmaps(hist, edges, bin_shape, clusters_idx):
     dim = len(hist.shape)
@@ -104,50 +144,71 @@ def create_heatmaps(hist, edges, bin_shape, clusters_idx):
     return ax
 
 def find_clusters(
-    data, bin_shape, threshold=50,
-    estimate_loc=True, max_cluster_count=np.inf,
+    data, bin_shape,
+    min_star_dif=10,
+    min_sigma_dif=3,
+    min_significance=3,
+    min_distance=1,
+    max_cluster_count=np.inf,
     heatmaps=False,
+    nyquist_offset=True,
     *args, **kwargs):
     dim = data.shape[1]
+    peaks = []
     # TODO: check bin_shape and data shapes
-    hist, edges = histogram(data, bin_shape)
-    smoothed = convolve(hist, *args, **kwargs)
-    sharp = hist - smoothed
-    # var = var_filter(hist, mask=kwargs.get('mask'))+1
-    std = std_filter(hist, mask=kwargs.get('mask'))+1
-    # var2 = np.sqrt(smoothed+var+1)
-    # normalized = sharp/snr0
-    normalized = sharp/std
-    # normalized = sharp/var2
-    clusters_idx = peak_local_max(normalized, min_distance=1, exclude_border=True,
-        num_peaks=max_cluster_count).T
 
-    locs=[]
-    stds=[]
-    for i in range(dim):
-        if estimate_loc:
-            i_edges = (edges[i][clusters_idx[i]]-bin_shape[i], edges[i][clusters_idx[i]]+bin_shape[i])
-            c_loc = []
-            c_std = []
-            for c in range(clusters_idx.shape[1]):
-                subset = data[:,i]
-                subset = subset[((subset>i_edges[0][c])&(subset<i_edges[1][c]))]
-                _, median, std = sigma_clipped_stats(subset, cenfunc='median', stdfunc='mad_std', maxiters=None, sigma=1)
-                c_loc.append(median)
-                c_std.append(std)
-            locs.append(c_loc)
-            stds.append(c_std)
-        else:
-            locs.append(edges[i][clusters_idx[i]]+bin_shape[i]/2)
-            stds.append(bin_shape[i])
-    star_counts = sharp[tuple(clusters_idx)]
+    if(nyquist_offset):
+        offsets = nyquist_offsets(bin_shape)
+    else:
+        offsets = np.atleast_2d(np.zeros(dim))
+    
+    for offset in offsets:
+        hist, edges = histogram(data, bin_shape, offset)
+        smoothed = convolve(hist, *args, **kwargs)
+        sharp = hist - smoothed
+        std = fast_std_filter(hist, mask=kwargs.get('mask'))
+        normalized = sharp/(std+1)
+        normalized[sharp < min_star_dif] = 0
+        normalized[sharp < min_sigma_dif*std] = 0
+        max_cluster_count = int(np.min([
+            np.count_nonzero(normalized > 0),
+            max_cluster_count,
+            np.count_nonzero(normalized >= min_significance)
+        ]))
+        clusters_idx = peak_local_max(normalized, min_distance=min_distance, exclude_border=True,
+            num_peaks=max_cluster_count).T
+        peak_count = clusters_idx.shape[1]
+        if peak_count != 0:
+            star_counts = sharp[tuple(clusters_idx)]
+            significance = normalized[tuple(clusters_idx)]
+            limits = [
+                    [(edges[i][clusters_idx[i][j]]-bin_shape[i], edges[i][clusters_idx[i][j]]+bin_shape[i])
+                    for i in range(dim)] for j in range(peak_count)
+                ]
+            subsets = [subset(data, limits[j]) for j in range(peak_count)]
+            statitstics = np.array([
+                [sigma_clipped_stats(subsets[j][:,i], cenfunc='median', 
+                    stdfunc='mad_std', maxiters=None, sigma=1)
+                for i in range(dim)] for j in range(peak_count)
+                ])
+            current_peaks = [
+                Peak(index=clusters_idx[:,i].T,
+                significance=significance[i],
+                star_count=star_counts[i],
+                center=statitstics[i,:,1],
+                sigma=np.array(bin_shape)
+                ) for i in range(peak_count) ]
+            peaks += current_peaks
+
+    global_peaks = best_peaks(peaks)
+
+    if len(global_peaks) == 0:
+        return FindClustersResult()
     
     res = FindClustersResult(
-        locs=np.array(locs).T,
-        stds=np.array(stds).T,
-        star_counts=star_counts
+        peaks=global_peaks
     )
-    if heatmaps and clusters_idx.size!=0:
+    if heatmaps:
         res.heatmaps = create_heatmaps(sharp, edges, bin_shape, clusters_idx)
     return res
     
@@ -170,6 +231,11 @@ def std_filter(data, mask=None, *args, **kwargs):
         c_filter=ndimage.generic_filter,
         function=np.std, *args, **kwargs,
     )
+
+def fast_std_filter(data, mask):
+    u_x2 = convolve(data, mask=mask)
+    ux_2 = convolve(data*data, mask=mask)
+    return ((ux_2 - u_x2*u_x2)**.5)
 
 def window3D(w):
     # Convert a 1D filtering kernel to 3D
