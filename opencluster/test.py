@@ -59,45 +59,23 @@ clusters = [
     )
 ]
 s = Synthetic(field=field, clusters=clusters).rvs()
-mask2=np.array(
-    [[[0,0,0,0,0],
-      [0,0,0,0,0],
-      [0,0,1,0,0],
-      [0,0,0,0,0],
-      [0,0,0,0,0]],
-      [[0,0,0,0,0],
-      [0,1,1,1,0],
-      [0,1,1,1,0],
-      [0,1,1,1,0],
-      [0,0,0,0,0]],
-      [[0,0,1,0,0],
-      [0,1,1,1,0],
-      [1,1,0,1,1],
-      [0,1,1,1,0],
-      [0,0,1,0,0]],
-      [[0,0,0,0,0],
-      [0,1,1,1,0],
-      [0,1,1,1,0],
-      [0,1,1,1,0],
-      [0,0,0,0,0]],
-      [[0,0,0,0,0],
-      [0,0,0,0,0],
-      [0,0,1,0,0],
-      [0,0,0,0,0],
-      [0,0,0,0,0]]]
-)
 
 print('detecting')
 
-mask2 = mask2/np.count_nonzero(mask2)
+data = s[['pmra', 'pmdec', 'parallax']].to_numpy()
 
 res = find_clusters(
-    s[['pmra', 'pmdec', 'parallax']].to_numpy(),
+    data=data,
     bin_shape=[1, 1, .1],
-    mask=mask2,
-    heatmaps=True
+    mask=default_mask(3),
+    heatmaps=False
     )
+
+ax = sns.scatterplot(x=data[:,0], y=data[:,1])
+for p in res.peaks:
+    ax.plot([p.center[0]], [p.center[1]], 'o', ms=60, mec='r', mfc='none')
 plt.show()
+
 
 n_sigmas = 1
 limits = np.dstack((res.locs - res.stds*n_sigmas, res.locs+res.stds*n_sigmas))

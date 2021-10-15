@@ -25,6 +25,7 @@ from skimage.feature import peak_local_max
 from statsmodels.robust.scale import huber, hubers_scale
 from astropy.stats import biweight_location, biweight_scale, mad_std
 from astropy.stats.sigma_clipping import sigma_clipped_stats
+from pprint import pprint
 
 test_clusters = [
     { 'name': 'ngc2527', 'description': 'OK' },
@@ -35,88 +36,58 @@ test_clusters = [
     { 'name': 'ngc2168', 'description': 'OK' }
 ]
 
-cluster = test_cluster[0]
-coords, metadata = simbad_search(cluster.name)
-radius = .5*u.deg
+cluster = test_clusters[0]
+# coords, metadata = simbad_search(cluster.get('name'))
+radius = 2.5*u.deg
 
+""" desc, colnames = remote_info(default_table())
+print('REMOTE TABLE INFO')
+pprint(desc)
+print('REMOTE TABLE COLUMNS')
+pprint(colnames)
+ """
+filters = { 'parallax': '>0.2' }
+""" count_query_result = (
+        query_region(name=cluster.get('name'), radius=radius)
+        .where(filters)
+        .count()
+    )
 
-data = ('scripts/data/DIAS_REGION/DIAS_REGION_data_2021-10-10_18-34-40')
-s = data[['ra', 'dec', 'pmra', 'pmdec', 'parallax']].to_pandas()
-mask2=np.array(
-    [[[0,0,0,0,0],
-      [0,0,0,0,0],
-      [0,0,1,0,0],
-      [0,0,0,0,0],
-      [0,0,0,0,0]],
-      [[0,0,0,0,0],
-      [0,1,1,1,0],
-      [0,1,1,1,0],
-      [0,1,1,1,0],
-      [0,0,0,0,0]],
-      [[0,0,1,0,0],
-      [0,1,1,1,0],
-      [1,1,0,1,1],
-      [0,1,1,1,0],
-      [0,0,1,0,0]],
-      [[0,0,0,0,0],
-      [0,1,1,1,0],
-      [0,1,1,1,0],
-      [0,1,1,1,0],
-      [0,0,0,0,0]],
-      [[0,0,0,0,0],
-      [0,0,0,0,0],
-      [0,0,1,0,0],
-      [0,0,0,0,0],
-      [0,0,0,0,0]]]
-)
+pprint(count_query_result)
+ """
+""" table = OCTable((
+        query_region(name=cluster.get('name'), radius=radius)
+        .select([
+            'ra', 'dec',
+            'pmra', 'pmra_error', 'pmdec', 'pmdec_error',
+            'parallax', 'parallax_error',
+            'phot_g_mean_mag'
+        ])
+        .where(filters)
+        .get()
+    ))
+print('writing file')
+table.write_to(f'/home/simon/repos/opencluster/scripts/data/{cluster.get("name")}.vot') """
 
-print('detecting')
+print('reading file')
+data = load_file(f'/home/simon/repos/opencluster/scripts/data/{cluster.get("name")}.vot').to_pandas()
 
-mask2 = mask2/np.count_nonzero(mask2)
-det_data = s[['pmdec', 'pmra', 'parallax', 'ra', 'dec']].to_numpy()
-det_data = det_data[det_data[:,2] > 0]
-det_data[:,2] = np.log10(det_data[:,2])
-det_pos = det_data[:,[3,4,2]]
-det_pm = det_data[:,[0,1,2]]
-pm_bin = [.5, .5, .05]
-pos_bin = [0.05, 0.05, .05]
+detection_data = data[['pmra', 'pmdec', 'parallax']].to_numpy()
+detection_data[:,2] = np.log10(detection_data[:,2])
+bin_shape = [.5, .5, .05]
+
 res = find_clusters(
-    data=det_pm,
-    bin_shape=pm_bin,
-    mask=mask2,
-    heatmaps=False,
-    #min_significance=1,
-    #min_sigma_dif=2,
-    #min_star_dif=5,
-    #max_cluster_count=4
+    data=detection_data,
+    bin_shape=bin_shape,
+    mask=default_mask(3)
 )
-n_sigmas = 1
-limits = np.dstack((res.locs - res.stds*n_sigmas, res.locs+res.stds*n_sigmas))
 
-print('subseting')
+coords = []
+check_data = data[['pmra', 'pmdec', 'parallax', 'ra', 'dec']].to_numpy()
+for peak in res.peaks:
+    limits = np.vstack((peak.center-peak.sigma, peak.center+peak.sigma)).T
+    s = subset(check_data, limits)
+    coords.append((np.median(s[:,3]), np.median(s[:,4])))
 
-subsets = [ subset(det_data, limits[i]) for i in range(len(limits)) ]
-coords = [ (np.median(subsets[i][:,3]), np.median(subsets[i][:,4])) for i in range(len(subsets)) ]
-pm = [ (res.locs[i][0], res.locs[i][1]) for i in range(len(subsets)) ]
-# sub_c3 = subset(s[['pmdec', 'pmra', 'log_parallax']].to_numpy(), limits[2])
-# sns.scatterplot(x=sub_c1[:,0], y=sub_c1[:,1])
-# plt.show()
-real = [('FSR 0775', 81.39583333333333, 34.9575, 0.10500000317891439), ('Majaess 58', 81.46666666666665, 34.875, 0.23333333333333334), ('FSR 0777', 81.87916666666665, 34.73361111111111, 0.11166666348775228), ('Stock 8', 82.02916666666667, 34.42333333333333, 0.2), ('Kronberger 1', 82.08749999999999, 34.775, 0.026666667064030966)]
-
-ax = sns.scatterplot(x=det_data[:,3], y=det_data[:,4])
-
-for r in real:
-    ax.plot([r[1]], [r[2]], 'o', ms=60, mec='b', mfc='none')
-
-for d in coords:
-    ax.plot([d[0]], [d[1]], 'o', ms=60, mec='r', mfc='none')
-
-plt.show()
-
-axpm = sns.scatterplot(x=det_data[:,0], y=det_data[:,1])
-for d in pm:
-    axpm.plot([d[0]], [d[1]], 'o', ms=60, mec='r', mfc='none')
-plt.show()
-print('membership')
-res2 = fuzzy_dbscan(subsets[0])
-print('coso')
+print('Sobredensidades detectadas en coordenadas:')
+pprint(coords)
