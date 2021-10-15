@@ -41,6 +41,8 @@ from attr import attrib, attrs, validators
 
 import numpy as np
 
+def default_table():
+    return 'gaiaedr3.gaia_source'
 
 def checkargs(function):
     """Check arguments match their annotated type.
@@ -178,7 +180,17 @@ class Query:
         CIRCLE('ICRS', {ra}, {dec}, {radius}))
     """
 
-    table = attrib(default=Gaia.MAIN_GAIA_TABLE)
+    COUNT_QUERY_TEMPLATE = """
+    SELECT COUNT(*)
+    FROM
+    {table_name}
+    WHERE
+    1 = CONTAINS(
+        POINT('ICRS', {ra_column}, {dec_column}),
+        CIRCLE('ICRS', {ra}, {dec}, {radius}))
+    """
+
+    table = attrib(default=default_table())
     column_filters = attrib(factory=dict)
     row_limit = attrib(default=-1)
     radius = attrib(default=None)
@@ -368,7 +380,45 @@ class Query:
         """
         query = self.build()
 
+        print('launching query')
+        print(query)
+        print('this may take some time...')
+
         job = Gaia.launch_job_async(query=query, **kwargs)
+        if not kwargs.get("dump_to_file"):
+            table = job.get_results()
+            return table
+
+    def count(self, **kwargs):
+        if self.radius is not None and self.coords is not None:
+            ra_hours, dec = coord_to_radec(self.coords)
+            ra = ra_hours * 15.0
+
+        query = self.COUNT_QUERY_TEMPLATE.format(
+            ra_column=self.ra_name,
+            dec_column=self.dec_name,
+            ra=ra,
+            dec=dec,
+            table_name=self.table,
+            radius=self.radius,
+        )
+
+        if self.column_filters:
+            query_filters = "".join(
+                [
+                    """AND {column} {condition}
+                """.format(
+                        column=column, condition=condition
+                    )
+                    for column, condition in self.column_filters.items()
+                ]
+            )
+            query += query_filters
+        print('launching query')
+        print(query)
+        print('this may take some time...')
+        job = Gaia.launch_job_async(query=query, **kwargs)
+
         if not kwargs.get("dump_to_file"):
             table = job.get_results()
             return table
@@ -407,7 +457,7 @@ def query_region(*, ra=None, dec=None, name=None, coord=None, radius):
         if not isinstance(name, str):
             raise ValueError("name must be string")
         else:
-            coord = simbad_search(name)
+            coord, _ = simbad_search(name)
     if (ra, dec) != (None, None):
         if not isinstance(ra, (float, int)) or not isinstance(
             dec, (float, int)
@@ -592,3 +642,7 @@ class OCTable:
             List of attribute names
         """
         return dir(self.table)
+
+    def write_to(self, filepath):
+        return writeto(self.table, filepath)
+
