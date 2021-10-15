@@ -68,9 +68,6 @@ class FindClustersResult:
     peaks: list=[]
     heatmaps=None
 
-def location_estimator(data):
-    return np.median(data, axis=0)
-
 def best_peaks(peaks: list):
     bests = [peaks[0]]
     peaks = peaks[1:]
@@ -81,7 +78,6 @@ def best_peaks(peaks: list):
             if bests[i].is_in_neighbourhood(peak):
                 if bests[i].significance < peak.significance:
                     bests[i] = peak
-                    print('changed')
                 break
             i+=1
         if i == len(bests):
@@ -143,6 +139,8 @@ def create_heatmaps(hist, edges, bin_shape, clusters_idx):
         plt.tight_layout()
     return ax
 
+
+
 def find_clusters(
     data, bin_shape,
     min_star_dif=10,
@@ -152,10 +150,22 @@ def find_clusters(
     max_cluster_count=np.inf,
     heatmaps=False,
     nyquist_offset=True,
+    min_star_count=10,
     *args, **kwargs):
     dim = data.shape[1]
     peaks = []
     # TODO: check bin_shape and data shapes
+
+    hist, edges = histogram(data, bin_shape)
+    idcs = np.argwhere(hist>=min_star_count)
+    idx_lim = np.vstack((idcs.min(axis=0), idcs.max(axis=0))).T
+    mask = kwargs.get('mask')
+    if mask is not None:
+        mask_shape = np.array(mask.shape)
+        idx_lim[:,0] = np.clip(idx_lim[:,0]-mask.shape, 0, None)
+        idx_lim[:,1] = np.clip(idx_lim[:,1]+mask.shape, None, hist.shape)
+    value_lim = [(edges[i][idx_lim[i][0]], edges[i][min(idx_lim[i][1]+1, hist.shape[i]-1)]) for i in range(dim)]
+    data = subset(data, value_lim)
 
     if(nyquist_offset):
         offsets = nyquist_offsets(bin_shape)
@@ -168,15 +178,12 @@ def find_clusters(
         sharp = hist - smoothed
         std = fast_std_filter(hist, mask=kwargs.get('mask'))
         normalized = sharp/(std+1)
-        normalized[sharp < min_star_dif] = 0
-        normalized[sharp < min_sigma_dif*std] = 0
-        max_cluster_count = int(np.min([
-            np.count_nonzero(normalized > 0),
-            max_cluster_count,
-            np.count_nonzero(normalized >= min_significance)
-        ]))
+
+        normalized[sharp < min_star_dif] = -np.inf
+        normalized[sharp < min_sigma_dif*std] = -np.inf
+
         clusters_idx = peak_local_max(normalized, min_distance=min_distance, exclude_border=True,
-            num_peaks=max_cluster_count).T
+            num_peaks=max_cluster_count, threshold_abs=min_significance).T
         peak_count = clusters_idx.shape[1]
         if peak_count != 0:
             star_counts = sharp[tuple(clusters_idx)]
@@ -200,10 +207,11 @@ def find_clusters(
                 ) for i in range(peak_count) ]
             peaks += current_peaks
 
-    global_peaks = best_peaks(peaks)
-
-    if len(global_peaks) == 0:
+    if len(peaks) == 0:
         return FindClustersResult()
+
+    global_peaks = best_peaks(peaks)
+    global_peaks.sort(key=lambda x: x.significance, reverse=True)[:max_cluster_count]
     
     res = FindClustersResult(
         peaks=global_peaks
