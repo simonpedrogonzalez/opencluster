@@ -150,7 +150,7 @@ def find_clusters(
     max_cluster_count=np.inf,
     heatmaps=False,
     nyquist_offset=True,
-    min_star_count=10,
+    min_star_count=5,
     *args, **kwargs):
     dim = data.shape[1]
     peaks = []
@@ -179,8 +179,8 @@ def find_clusters(
         std = fast_std_filter(hist, mask=kwargs.get('mask'))
         normalized = sharp/(std+1)
 
-        normalized[sharp < min_star_dif] = -np.inf
-        normalized[sharp < min_sigma_dif*std] = -np.inf
+        normalized[sharp < min_star_dif] = 0
+        normalized[sharp < min_sigma_dif*std] = 0
 
         clusters_idx = peak_local_max(normalized, min_distance=min_distance, exclude_border=True,
             num_peaks=max_cluster_count, threshold_abs=min_significance).T
@@ -211,8 +211,11 @@ def find_clusters(
         return FindClustersResult()
 
     global_peaks = best_peaks(peaks)
-    global_peaks.sort(key=lambda x: x.significance, reverse=True)[:max_cluster_count]
-    
+    global_peaks.sort(key=lambda x: x.significance, reverse=True)
+    if max_cluster_count == np.inf:
+        global_peaks = global_peaks[0:-1]
+    else:
+        global_peaks = global_peaks[0:max_cluster_count]
     res = FindClustersResult(
         peaks=global_peaks
     )

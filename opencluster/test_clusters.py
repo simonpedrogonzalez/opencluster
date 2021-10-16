@@ -83,7 +83,8 @@ res = find_clusters(
 )
 
 coords = []
-check_data = data[['pmra', 'pmdec', 'parallax', 'ra', 'dec']].to_numpy()
+data['log_parallax'] = np.log10(data['parallax'].to_numpy())
+check_data = data[['pmra', 'pmdec', 'log_parallax', 'ra', 'dec']].to_numpy()
 for peak in res.peaks:
     limits = np.vstack((peak.center-peak.sigma, peak.center+peak.sigma)).T
     s = subset(check_data, limits)
