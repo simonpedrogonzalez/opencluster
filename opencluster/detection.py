@@ -212,9 +212,7 @@ def find_clusters(
 
     global_peaks = best_peaks(peaks)
     global_peaks.sort(key=lambda x: x.significance, reverse=True)
-    if max_cluster_count == np.inf:
-        global_peaks = global_peaks[0:-1]
-    else:
+    if not max_cluster_count == np.inf:
         global_peaks = global_peaks[0:max_cluster_count]
     res = FindClustersResult(
         peaks=global_peaks
