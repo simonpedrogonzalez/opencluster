@@ -64,29 +64,21 @@ print('detecting')
 
 data = s[['pmra', 'pmdec', 'parallax']].to_numpy()
 
+bin_shape = [1, 1, .1]
+
 res = find_clusters(
     data=data,
-    bin_shape=[1, 1, .1],
+    bin_shape=bin_shape,
     mask=default_mask(3),
     heatmaps=False
     )
 
-ax = sns.scatterplot(x=data[:,0], y=data[:,1])
-for p in res.peaks:
-    ax.plot([p.center[0]], [p.center[1]], 'o', ms=60, mec='r', mfc='none')
-plt.show()
-
-
-n_sigmas = 1
-limits = np.dstack((res.locs - res.stds*n_sigmas, res.locs+res.stds*n_sigmas))
-
 print('subseting')
+subsets = []
+for p in res.peaks:
+    lim = np.vstack((p.center-bin_shape, p.center+bin_shape)).T
+    subsets.append(subset(data, lim))
 
-sub_c1 = subset(s[['pmdec', 'pmra', 'log_parallax']].to_numpy(), limits[0])
-sub_c2 = subset(s[['pmdec', 'pmra', 'log_parallax']].to_numpy(), limits[1])
-# sub_c3 = subset(s[['pmdec', 'pmra', 'log_parallax']].to_numpy(), limits[2])
-# sns.scatterplot(x=sub_c1[:,0], y=sub_c1[:,1])
-# plt.show()
 print('membership')
-res2 = fuzzy_dbscan(sub_c2)
+res2 = fuzzy_dbscan(subsets[0])
 print('coso')

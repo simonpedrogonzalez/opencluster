@@ -38,7 +38,7 @@ def cano_alfaro_method(data):
 def fuzzy_dbscan(data, *args, **kwargs):
     data = RobustScaler().fit(data).transform(data)
     res = HDBSCAN(
-        min_cluster_size=50,
+        min_cluster_size=10,
         min_samples=2*data.shape[1],
         allow_single_cluster=True,
         metric='euclidean',

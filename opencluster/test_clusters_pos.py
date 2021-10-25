@@ -27,13 +27,6 @@ from astropy.stats import biweight_location, biweight_scale, mad_std
 from astropy.stats.sigma_clipping import sigma_clipped_stats
 from pprint import pprint
 
-""" desc, colnames = remote_info(default_table())
-print('REMOTE TABLE INFO')
-pprint(desc)
-print('REMOTE TABLE COLUMNS')
-pprint(colnames)
- """
- 
 test_clusters = [
     {
         'name': 'Stock 8',
@@ -86,78 +79,31 @@ test_clusters = [
     }
 ]
 
-
-# data downloading
-""" 
-for i in range(1):
-    cluster = test_clusters[i]
-    radius = cluster.get('area_radius')*u.deg
-    filters = cluster.get('filters')
-
-    # center
-    simbad_search(
-        cluster.get('name'),
-        dump_to_file=True,
-        output_file=f'/home/simon/repos/opencluster/scripts/data/meta-{cluster.get("name")}.vot'
-        )
-
-    print('counting...')
-    # count before download!!!
-    count_query_result = (
-            query_region(name=cluster.get('name'), radius=radius)
-            .where(filters)
-            .count()
-        )
-    # control
-    print(f'Query star count: {count_query_result["count_all"][0]}')
-    assert count_query_result['count_all'][0] < int(2e6)
-
-    print('downloading...')
-    # download data and write file
-    table = OCTable((
-            query_region(name=cluster.get('name'), radius=radius)
-            .select([
-                'ra', 'dec',
-                'pmra', 'pmra_error', 'pmdec', 'pmdec_error',
-                'parallax', 'parallax_error',
-                'phot_g_mean_mag'
-            ])
-            .where(filters)
-            .get()
-        ))
-    table.table['log10_parallax'] = np.log10(table.to_pandas()['parallax'].to_numpy())
-
-    print('writing file...')
-    table.write_to(f'/home/simon/repos/opencluster/scripts/data/{cluster.get("name")}.vot')
-    print(f'{cluster.get("name")} ready')
- """
-i = 0
+i = 2
 cluster = test_clusters[i]
 
 print('reading file')
 data = load_file(f'/home/simon/repos/opencluster/scripts/data/{cluster.get("name")}.vot').to_pandas()
 
-detection_data = data[['pmra', 'pmdec', 'parallax']].to_numpy()
-detection_data[:,2] = np.log10(detection_data[:,2])
-bin_shape = [.5, .5, .05]
+detection_data = data[['pmra', 'pmdec', 'log10_parallax']].to_numpy()
+increase = [.01, .01, 0]
+max_bin_shape = np.array([1, 1, .05])
+bin_shape = np.array([ .3, .3, .05])
+best_shape = None
+best_significance = 0
+cont = 0
+while not np.any(bin_shape > max_bin_shape):
+    bin_shape = bin_shape+increase
+    print(f'iter: {str(cont)}')
+    cont+=1
+    res = find_clusters(
+        data=detection_data,
+        bin_shape=bin_shape,
+        mask=default_mask(3)
+    )
+    if len(res.peaks) > 0 and res.peaks[0].significance > best_significance:
+        best_significance = res.peaks[0].significance
+        best_shape = bin_shape
 
-print('detecting')
-
-
-result = find_clusters(
-    data=detection_data,
-    bin_shape=bin_shape,
-    mask=default_mask(3)
-)
-
-coords = []
-data['log_parallax'] = np.log10(data['parallax'].to_numpy())
-check_data = data[['pmra', 'pmdec', 'log_parallax', 'ra', 'dec']].to_numpy()
-for peak in res.peaks:
-    limits = np.vstack((peak.center-peak.sigma/2, peak.center+peak.sigma/2)).T
-    s = subset(check_data, limits)
-    coords.append((np.median(s[:,3]), np.median(s[:,4])))
-
-print('Sobredensidades detectadas en coordenadas:')
-pprint(res.peaks)
-pprint(coords)
+print(best_shape)
+print(best_significance)
