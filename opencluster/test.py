@@ -80,5 +80,5 @@ for p in res.peaks:
     subsets.append(subset(data, lim))
 
 print('membership')
-res2 = fuzzy_dbscan(subsets[0])
+res2 = membership(subsets[0], res.peaks[0].star_count)
 print('coso')
