@@ -23,11 +23,15 @@ from statsmodels.robust.scale import huber, hubers_scale
 from astropy.stats import biweight_location, biweight_scale, mad_std
 from astropy.stats.sigma_clipping import sigma_clipped_stats
 from hdbscan import HDBSCAN, all_points_membership_vectors
+from hdbscan.validity import validity_index
 from sklearn.preprocessing import RobustScaler
 from sklearn.manifold import TSNE
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KernelDensity
 from sklearn.model_selection import GridSearchCV
+# from pyclustertend import hopkins, ivat, vat
+from clustering_tendency import hopkins, dip
+from statsmodels.nonparametric.kernel_density import KDEMultivariate
 
 """ class VariableBandiwthKDE:
     def fit(data):
@@ -55,41 +59,100 @@ def estimate_bandwidth(data, n_iters=20):
 
 def pair(data, mem, labels):
     df = pd.DataFrame(data)
-    df.columns = ['pmra', 'pmdec', 'parallax']
+    if (data.shape[1] == 3):
+        df.columns = ['pmra', 'pmdec', 'log10_parallax']
+    elif (data.shape[1] == 5):
+        df.columns = ['pmra', 'pmdec', 'log10_parallax', 'ra', 'dec']
+    else:
+        raise Exception('wrong col number')
     return sns.pairplot(
         df, plot_kws={'hue':np.round(mem, 2)},
         diag_kind='kde', diag_kws={'hue':labels},
         corner=True,
         ).map_lower(sns.kdeplot, levels=4, color=".1")
 
-def membership(data, star_count):
-    scaled = RobustScaler().fit(data).transform(data)
-    cl_results = fuzzy_dbscan(scaled, star_count)
-    labels = np.unique(cl_results.labels_)
+
+@attrs(auto_attribs=True)
+class ClusteringResult:
+    hdbscan: HDBSCAN
+    diptest_pval: float
+
+
+@attrs(auto_attribs=True)
+class MembershipResult:
+    probabilities: np.ndarray
+    hopkins_metric: float
+    clustering_result: ClusteringResult
+    success: bool
+
+def membership(data: np.ndarray, star_count: int, hopkins_threshold:float=.75, scaler=RobustScaler()):
+
+    dim = np.atleast_2d(data).shape[1]
+
+    if scaler is not None:
+        scaled = scaler.fit(data).transform(data)
+    else:
+        scaled = data
+    
+    hopkins_metric = hopkins(scaled)
+
+    if hopkins_threshold is not None and hopkins_metric < hopkins_threshold:
+        return MembershipResult(
+            probabilities=None,
+            hopkins_metric=hopkins_metric,
+            clustering_result=None,
+            success=False
+        )
+    
+    cl_result = hdbscan(scaled, star_count)
+    labels = np.unique(cl_result.hdbscan.labels_)
     mem = np.zeros((data.shape[0], labels.shape[0]))
+    # use stats model implementation instead
+    
     for label in labels:
-        grid = estimate_bandwidth(scaled[cl_results.labels_ == label])
-        mem[:,label+1] = np.exp(grid.best_estimator_.score_samples(scaled))
+        mem[:,label+1] = KDEMultivariate(
+            scaled[cl_result.hdbscan.labels_],
+            var_type='c'*dim, bw='cl_ml'
+        ).pdf(scaled)
 
     mem = mem/np.atleast_2d(mem.sum(axis=1)).repeat(labels.shape[0], axis=0).T
 
-    p1 = pair(data, mem[:,1], cl_results.labels_)
-    
-    p2 = pair(scaled, mem[:,1], cl_results.labels_)
+    pair(scaled, mem, cl_result.hdbscan.labels_)
     plt.show()
-    
-    return mem
-    
-def fuzzy_dbscan(data, star_count):
-    res = HDBSCAN(
+
+    return MembershipResult(
+        probabilities=mem,
+        hopkins_metric=hopkins_metric,
+        clustering_result=cl_result,
+        success=True
+    )
+
+
+
+def hdbscan(data, star_count):
+
+    diptest_pval = dip(data)
+
+    if (diptest_pval <= .1):
+        # pval < .05 => strong multimodality tendency
+        # pval < .1 => marginally significant multimodality tendency
+        multiple_clusters_result = HDBSCAN(
+            min_cluster_size=int(star_count),
+            metric='mahalanobis',
+            V=np.cov(data, rowvar=False),
+            prediction_data=True,
+        ).fit(data)
+        return ClusteringResult(multiple_clusters_result, diptest_pval)
+
+    single_cluster_result = HDBSCAN(
         min_cluster_size=int(star_count),
-        # min_samples=data.shape[1]*2,
         allow_single_cluster=True,
         metric='mahalanobis',
         V=np.cov(data, rowvar=False),
         prediction_data=True,
-        ).fit(data)
-
+    ).fit(data)
+    return ClusteringResult(single_cluster_result, diptest_pval)
+    
     """ df = pd.DataFrame(data)
     df.columns = ['pmra', 'pmdec', 'parallax']
     df['label'] = res.labels_
@@ -99,7 +162,6 @@ def fuzzy_dbscan(data, star_count):
     # habría que ajustarlos!
     #outlier_scores = res.outlier_scores_
     #memberships = cluster_memberships
-    return res 
     # memberships = np.insert(cluster_memberships, 1, outlier_scores, 1)
     
 """  projection = TSNE().fit_transform(data)
