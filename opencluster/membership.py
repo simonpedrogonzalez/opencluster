@@ -11,6 +11,7 @@ import pandas as pd
 from scipy import stats
 from scipy.optimize import curve_fit
 from scipy import ndimage
+from scipy.stats import gaussian_kde
 from typing_extensions import TypedDict
 from typing import Optional, Tuple, List, Union, Callable
 from attr import attrib, attrs, validators
@@ -32,6 +33,7 @@ from sklearn.model_selection import GridSearchCV
 # from pyclustertend import hopkins, ivat, vat
 from clustering_tendency import hopkins, dip
 from statsmodels.nonparametric.kernel_density import KDEMultivariate
+from KDEpy import FFTKDE
 
 """ class VariableBandiwthKDE:
     def fit(data):
@@ -40,7 +42,7 @@ from statsmodels.nonparametric.kernel_density import KDEMultivariate
         for i in range(dim):
             estimate_bandwidth """
 
-def estimate_bandwidth(data, n_iters=20):
+def best_kde(data, n_iters=20):
     #seperate into validation and training
     #random_sample_size = data.shape[0]*.9
     #train, test = train_test_split(data, test_size=random_sample_size, train_size=random_sample_size)
@@ -57,7 +59,7 @@ def estimate_bandwidth(data, n_iters=20):
     #kde_gauss.score(val_data)
     return grid
 
-def pair(data, mem, labels):
+def pair(data, mem=None, labels=None):
     df = pd.DataFrame(data)
     if (data.shape[1] == 3):
         df.columns = ['pmra', 'pmdec', 'log10_parallax']
@@ -65,8 +67,14 @@ def pair(data, mem, labels):
         df.columns = ['pmra', 'pmdec', 'log10_parallax', 'ra', 'dec']
     else:
         raise Exception('wrong col number')
+    if mem is None and labels is None:
+        return sns.pairplot(df)
+    if mem is not None:
+        hue = np.round(mem, 2)
+    else:
+        hue = labels
     return sns.pairplot(
-        df, plot_kws={'hue':np.round(mem, 2)},
+        df, plot_kws={'hue': hue },
         diag_kind='kde', diag_kws={'hue':labels},
         corner=True,
         ).map_lower(sns.kdeplot, levels=4, color=".1")
@@ -85,7 +93,7 @@ class MembershipResult:
     clustering_result: ClusteringResult
     success: bool
 
-def membership(data: np.ndarray, star_count: int, hopkins_threshold:float=.75, scaler=RobustScaler()):
+def membership(data: np.ndarray, star_count: int, hopkins_threshold:float=.6, scaler=RobustScaler()):
 
     dim = np.atleast_2d(data).shape[1]
 
@@ -94,6 +102,7 @@ def membership(data: np.ndarray, star_count: int, hopkins_threshold:float=.75, s
     else:
         scaled = data
     
+    print('hopkins')
     hopkins_metric = hopkins(scaled)
 
     if hopkins_threshold is not None and hopkins_metric < hopkins_threshold:
@@ -104,20 +113,21 @@ def membership(data: np.ndarray, star_count: int, hopkins_threshold:float=.75, s
             success=False
         )
     
+    print('clustering')
     cl_result = hdbscan(scaled, star_count)
     labels = np.unique(cl_result.hdbscan.labels_)
     mem = np.zeros((data.shape[0], labels.shape[0]))
-    # use stats model implementation instead
     
     for label in labels:
-        mem[:,label+1] = KDEMultivariate(
-            scaled[cl_result.hdbscan.labels_],
-            var_type='c'*dim, bw='cl_ml'
-        ).pdf(scaled)
+        population = scaled[cl_result.hdbscan.labels_==label]
+        # TODO: add bw estimation
+        print(f'kde for label {label}')
+        # mem[:,label+1] = np.exp(KernelDensity().fit(population).score_samples(scaled))
+        mem[:,label+1] = gaussian_kde(population.T).pdf(scaled.T)
 
     mem = mem/np.atleast_2d(mem.sum(axis=1)).repeat(labels.shape[0], axis=0).T
 
-    pair(scaled, mem, cl_result.hdbscan.labels_)
+    pair(scaled, mem[:,1], cl_result.hdbscan.labels_)
     plt.show()
 
     return MembershipResult(
@@ -129,10 +139,12 @@ def membership(data: np.ndarray, star_count: int, hopkins_threshold:float=.75, s
 
 
 
-def hdbscan(data, star_count):
+def hdbscan(data, star_count, n_clusters: str='dip'):
 
+    print('dip')
     diptest_pval = dip(data)
 
+    print('hdbscan')
     if (diptest_pval <= .1):
         # pval < .05 => strong multimodality tendency
         # pval < .1 => marginally significant multimodality tendency
