@@ -12,7 +12,7 @@ from scipy import stats
 from scipy.optimize import curve_fit
 from scipy import ndimage
 from typing_extensions import TypedDict
-from typing import Optional, Tuple, List, Union, Callable
+from typing import Optional, Tuple, List, Union, Callable, Type, Optional
 from attr import attrib, attrs, validators
 import copy
 import math
@@ -22,6 +22,7 @@ from skimage.feature import peak_local_max
 from statsmodels.robust.scale import huber, hubers_scale
 from astropy.stats import biweight_location, biweight_scale, mad_std
 from astropy.stats.sigma_clipping import sigma_clipped_stats
+from warnings import warn
 
 def default_mask(dim: int):
     indexes = np.array(np.meshgrid(*np.tile(np.arange(5), (dim, 1)))).T.reshape((-1, dim))
@@ -36,7 +37,7 @@ def convolve(data, mask: np.ndarray=None, c_filter: callable=None, *args, **kwar
     if mask is not None:
         return ndimage.convolve(data, mask, *args, **kwargs)
 
-def histogram(data, bin_shape: list, nyquist_offset: list=None):
+def histogram(data, bin_shape: Union[list, np.ndarray], nyquist_offset: list=None):
     dim = data.shape[1]
     offset = [(bin_shape[i] - (data[:,i].max() - data[:,i].min()) % bin_shape[i])/2 for i in range(dim)]
     ranges = [[data[:,i].min() - offset[i], data[:,i].max() + offset[i]] for i in range(dim)]
@@ -55,10 +56,10 @@ def nyquist_offsets(bin_shape: list):
 @attrs(auto_attribs=True)
 class Peak():
     index: np.ndarray
-    significance: float
-    star_count: float
+    significance: Union[float, int]
+    count: Union[float, int]
     center: np.ndarray
-    sigma: np.ndarray
+    sigma: Optional[np.ndarray]
 
     def is_in_neighbourhood(self, b):
         return not np.any(np.abs(self.index-b.index) > 1)
@@ -140,53 +141,100 @@ def create_heatmaps(hist, edges, bin_shape, clusters_idx):
     return ax
 
 
+# TODO: improve memory usage
+def count_based_outlier_removal(data, bin_shape, mask, min_count):
+    
+    dim = np.atleast_2d(data).shape[1]
+    mask_shape = np.array(mask.shape)
+    
+    hist, edges = histogram(data, bin_shape)
+    idcs = np.argwhere(hist>=min_count)
+    idx_lim = np.vstack((idcs.min(axis=0), idcs.max(axis=0))).T
+
+    idx_lim[:,0] = np.clip(idx_lim[:,0]-mask.shape, 0, None)
+    idx_lim[:,1] = np.clip(idx_lim[:,1]+mask.shape, None, hist.shape)
+
+    value_lim = [(edges[i][idx_lim[i][0]], edges[i][min(idx_lim[i][1]+1, hist.shape[i])]) for i in range(dim)]
+    data = subset(data, value_lim)
+    
+    if data.shape[0] == 0:
+        raise Exception('No bin passed minimum density check. Check min_count parameter.')
+    return data, hist, edges
 
 def find_clusters(
-    data, bin_shape,
-    min_star_dif=10,
-    min_sigma_dif=3,
-    min_significance=3,
-    min_distance=1,
-    max_cluster_count=np.inf,
-    heatmaps=False,
+    data: np.ndarray,
+    bin_shape: Union[list, np.ndarray],
+    mask: Union[list, np.ndarray] = None,
     nyquist_offset=True,
-    min_star_count=5,
+    min_count:Union[int, float]=5,
+    min_dif:Union[int, float]=10,
+    min_sigma_dif:Union[int, float]=3,
+    min_significance:Union[int, float]=1,
+    max_num_peaks:Union[int, float]=np.inf,
+    min_interpeak_dist:Union[int, float]=1,
+    heatmaps=False,
     *args, **kwargs):
-    dim = data.shape[1]
-    peaks = []
-    # TODO: check bin_shape and data shapes
 
-    hist, edges = histogram(data, bin_shape)
-    idcs = np.argwhere(hist>=min_star_count)
-    idx_lim = np.vstack((idcs.min(axis=0), idcs.max(axis=0))).T
-    mask = kwargs.get('mask')
-    if mask is not None:
-        mask_shape = np.array(mask.shape)
-        idx_lim[:,0] = np.clip(idx_lim[:,0]-mask.shape, 0, None)
-        idx_lim[:,1] = np.clip(idx_lim[:,1]+mask.shape, None, hist.shape)
-    value_lim = [(edges[i][idx_lim[i][0]], edges[i][min(idx_lim[i][1]+1, hist.shape[i]-1)]) for i in range(dim)]
-    data = subset(data, value_lim)
+    dim = np.atleast_2d(data).shape[1]
 
+    if mask is None:
+        mask = default_mask(dim)
+
+    mask = np.array(mask)
+    bin_shape = np.array(bin_shape)
+    if len(mask.shape) != dim:
+        raise ValueError('mask does not match data dimensions')
+    if len(bin_shape) != dim:
+        raise ValueError('bin_shape does not match data dimensions')
+
+    # outlier removal
+    if min_count:
+        data, hist, edges = count_based_outlier_removal(data, bin_shape, mask, min_count)
+    
+    # calculate possible bin offsets
     if(nyquist_offset):
         offsets = nyquist_offsets(bin_shape)
     else:
         offsets = np.atleast_2d(np.zeros(dim))
     
+    # set detection parameters for all runs
+    peak_detection_params = { 'exclude_border' : True }
+    if min_interpeak_dist:
+        peak_detection_params['min_distance'] = min_interpeak_dist
+    if min_significance:
+        peak_detection_params['threshold_abs'] = min_significance
+    if max_num_peaks:
+        peak_detection_params['num_peaks'] = max_num_peaks
+    if np.any(hist.shape) < 3:
+        warn(f'histogram has too few bins in some dimensions: hist shape is {hist.shape}')
+        peak_detection_params['exclude_border'] = False
+
+    # detect
+    peaks = []
     for offset in offsets:
+
         hist, edges = histogram(data, bin_shape, offset)
-        smoothed = convolve(hist, *args, **kwargs)
+        smoothed = convolve(hist, mask=mask)
         sharp = hist - smoothed
-        std = fast_std_filter(hist, mask=kwargs.get('mask'))
+        std = fast_std_filter(hist, mask=mask)
         normalized = sharp/(std+1)
 
-        normalized[sharp < min_star_dif] = 0
-        normalized[sharp < min_sigma_dif*std] = 0
+        if min_dif is not None:
+            # check for other way to implement
+            normalized[sharp < min_dif] = 0
+        if min_sigma_dif is not None:
+            normalized[sharp < min_sigma_dif*std] = 0
 
-        clusters_idx = peak_local_max(normalized, min_distance=min_distance, exclude_border=True,
-            num_peaks=max_cluster_count, threshold_abs=min_significance).T
+        clusters_idx = peak_local_max(
+            normalized,
+            **peak_detection_params
+        ).T
+        
         peak_count = clusters_idx.shape[1]
+        
         if peak_count != 0:
-            star_counts = sharp[tuple(clusters_idx)]
+        
+            counts = sharp[tuple(clusters_idx)]
             significance = normalized[tuple(clusters_idx)]
             limits = [
                     [(edges[i][clusters_idx[i][j]]-bin_shape[i], edges[i][clusters_idx[i][j]]+bin_shape[i])
@@ -199,11 +247,12 @@ def find_clusters(
                 for i in range(dim)] for j in range(peak_count)
                 ])
             current_peaks = [
-                Peak(index=clusters_idx[:,i].T,
-                significance=significance[i],
-                star_count=star_counts[i],
-                center=statitstics[i,:,1],
-                sigma=np.array(bin_shape)
+                Peak(
+                    index=clusters_idx[:,i].T,
+                    significance=significance[i],
+                    count=counts[i],
+                    center=statitstics[i,:,1],
+                    sigma=np.array(bin_shape),
                 ) for i in range(peak_count) ]
             peaks += current_peaks
 
@@ -212,8 +261,10 @@ def find_clusters(
 
     global_peaks = best_peaks(peaks)
     global_peaks.sort(key=lambda x: x.significance, reverse=True)
-    if not max_cluster_count == np.inf:
-        global_peaks = global_peaks[0:max_cluster_count]
+    
+    if max_num_peaks != np.inf:
+        global_peaks = global_peaks[0:max_num_peaks]
+    
     res = FindClustersResult(
         peaks=global_peaks
     )
@@ -257,6 +308,7 @@ def window3D(w):
     win2=np.transpose(win2,np.hstack([1,2,0]))
     win=np.multiply(win1,win2)
     return win
+
 
 """ mask = mask*1
 mask = mask/np.count_nonzero(mask)

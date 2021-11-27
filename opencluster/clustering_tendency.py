@@ -14,7 +14,7 @@ def hopkins(
     data: np.ndarray,
     n_samples=None,
     metric='mahalanobis',
-    n_iters=1000,
+    n_iters=100,
     reduction=np.median,
     *args,
     **kwargs
@@ -90,9 +90,7 @@ def dip(data, n_samples=None, metric='mahalanobis', *args, **kwargs):
         raise Exception('The number of sample of sample is bigger than the shape of D')
 
     sample = resample(data, n_samples=n_samples, replace=False)
-    
     dist = np.ravel(np.tril(pairwise_distances(sample, metric=metric)))
-
     dist = np.msort(dist[dist > 0])
     _, pval, _ = diptst(dist, *args, **kwargs)
     return pval
