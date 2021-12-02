@@ -34,6 +34,7 @@ from sklearn.model_selection import GridSearchCV
 from clustering_tendency import hopkins, dip
 from statsmodels.nonparametric.kernel_density import KDEMultivariate
 from KDEpy import FFTKDE
+from opencluster.kdeh import HKDE
 
 """ class VariableBandiwthKDE:
     def fit(data):
@@ -93,7 +94,14 @@ class MembershipResult:
     clustering_result: ClusteringResult
     success: bool
 
-def membership(data: np.ndarray, star_count: int, hopkins_threshold:float=.6, scaler=RobustScaler()):
+def membership(
+    data: np.ndarray,
+    star_count: int, 
+    errors: np.ndarray = None,
+    corr: np.ndarray = None,
+    hopkins_threshold:float=.6,
+    scaler=RobustScaler(),
+    ):
 
     dim = np.atleast_2d(data).shape[1]
 
@@ -117,15 +125,22 @@ def membership(data: np.ndarray, star_count: int, hopkins_threshold:float=.6, sc
     cl_result = hdbscan(scaled, star_count)
     labels = np.unique(cl_result.hdbscan.labels_)
     mem = np.zeros((data.shape[0], labels.shape[0]))
+    mem2 = np.zeros((data.shape[0], labels.shape[0]))
     
     for label in labels:
         population = scaled[cl_result.hdbscan.labels_==label]
         # TODO: add bw estimation
         print(f'kde for label {label}')
         # mem[:,label+1] = np.exp(KernelDensity().fit(population).score_samples(scaled))
-        mem[:,label+1] = gaussian_kde(population.T).pdf(scaled.T)
+        mem2[:,label+1] = gaussian_kde(population.T).pdf(scaled.T)
+        mem[:,label+1] = HKDE().fit(
+            data=population,
+            errors=errors[cl_result.hdbscan.labels_==label],
+            corr=corr[cl_result.hdbscan.labels_==label],
+        ).pdf(scaled)
 
     mem = mem/np.atleast_2d(mem.sum(axis=1)).repeat(labels.shape[0], axis=0).T
+    mem2 = mem2/np.atleast_2d(mem2.sum(axis=1)).repeat(labels.shape[0], axis=0).T
 
     pair(scaled, mem[:,1], cl_result.hdbscan.labels_)
     plt.show()

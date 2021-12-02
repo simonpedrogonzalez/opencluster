@@ -101,13 +101,14 @@ class HKDE:
     kernels: np.ndarray = None
 
     def fit(self, data: np.ndarray, errors: np.ndarray=None, corr: np.ndarray=None, bw: Union[np.ndarray, float, str]='silverman'):
+        print('fitting')
         obs, dims = data.shape
         cov_matrices = get_cov_matrices(data, errors, corr, bw)
         self.kernels = [
             multivariate_normal(
                 data[i],
                 cov_matrices[i],
-                allow_singular=True
+                allow_singular=True,
             ) for i in range(obs)
         ]        
         return self
