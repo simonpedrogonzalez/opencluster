@@ -32,33 +32,44 @@ def get_corr_coefs(data: np.ndarray, corr: np.ndarray=None):
     obs, dims = data.shape
     if corr is not None:
         # correlation is given
-        if corr.shape == (dims, dims):
-            # correlation is given as global correlation matrix per dims
-            return np.repeat(corr, repeats=obs, axis=1).reshape((dims, dims, obs)).T
-        elif corr.shape == (obs, int(dims*(dims-1)/2)):
-            # correlation is given per observation per obs, per dims
-            # pairwise corr coef (no need for the 1s given by corr(samevar, samevar)) per observation
-            # example: for 1 obs and 4 vars, lower triangle of corr matrix looks like
-            # 12
-            # 13 23 
-            # 14 24 34
-            # method should receive obs1 => [12, 13, 23, 14, 24, 34]
-            n_corrs = corr.shape[1]
+        if isinstance(corr, float) or isinstance(corr, int):
+            # is a float or int
             corrs = np.zeros((obs, dims, dims))
-            tril_idcs = tuple(map(tuple, np.vstack((
-                np.arange(obs).repeat(n_corrs),
-                np.tile(np.array(np.tril_indices(dims, k=-1)), (obs,))
-            ))))
-            corrs[tril_idcs] = corr.ravel()
-            corrs = corrs + np.transpose(corrs, (0,2,1))
             diag_idcs = tuple(map(tuple, np.vstack((
-                np.arange(obs).repeat(dims),
-                np.tile(np.array(np.diag_indices(dims)), (obs,))
-            ))))
+                    np.arange(obs).repeat(dims),
+                    np.tile(np.array(np.diag_indices(dims)), (obs,))
+                ))))
             corrs[diag_idcs] = 1
             return corrs
-        else:
-            return ValueError('Wrong correlation parameter')
+        elif isinstance(corr, np.ndarray):
+            # is array
+            if corr.shape == (dims, dims):
+                # correlation is given as global correlation matrix per dims
+                return np.repeat(corr, repeats=obs, axis=1).reshape((dims, dims, obs)).T
+            elif corr.shape == (obs, int(dims*(dims-1)/2)):
+                # correlation is given per observation per obs, per dims
+                # pairwise corr coef (no need for the 1s given by corr(samevar, samevar)) per observation
+                # example: for 1 obs and 4 vars, lower triangle of corr matrix looks like
+                # 12
+                # 13 23 
+                # 14 24 34
+                # method should receive obs1 => [12, 13, 23, 14, 24, 34]
+                n_corrs = corr.shape[1]
+                corrs = np.zeros((obs, dims, dims))
+                tril_idcs = tuple(map(tuple, np.vstack((
+                    np.arange(obs).repeat(n_corrs),
+                    np.tile(np.array(np.tril_indices(dims, k=-1)), (obs,))
+                ))))
+                corrs[tril_idcs] = corr.ravel()
+                corrs = corrs + np.transpose(corrs, (0,2,1))
+                diag_idcs = tuple(map(tuple, np.vstack((
+                    np.arange(obs).repeat(dims),
+                    np.tile(np.array(np.diag_indices(dims)), (obs,))
+                ))))
+                corrs[diag_idcs] = 1
+                return corrs
+            else:
+                return ValueError('Wrong correlation parameter')
     else:
         # correlation is not given, calculate from data
         return np.repeat(
@@ -99,10 +110,12 @@ def get_cov_matrices(data, errors, corr, bw):
 class HKDE:
 
     kernels: np.ndarray = None
+    n: int = None
 
-    def fit(self, data: np.ndarray, errors: np.ndarray=None, corr: np.ndarray=None, bw: Union[np.ndarray, float, str]='silverman'):
+    def fit(self, data: np.ndarray, errors: np.ndarray=None, corr: Union[np.ndarray, float, int]=None, bw: Union[np.ndarray, float, str]='silverman'):
         print('fitting')
         obs, dims = data.shape
+        self.n = obs
         cov_matrices = get_cov_matrices(data, errors, corr, bw)
         self.kernels = [
             multivariate_normal(
@@ -121,7 +134,7 @@ class HKDE:
             applied_k = k.pdf(data)
             applied_k[i] = 0
             pdf += applied_k
-        return pdf/(obs-1)
+        return pdf/(self.n-1)
 
 """ obs = 3
 dims = 3

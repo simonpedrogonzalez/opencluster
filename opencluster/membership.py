@@ -63,9 +63,9 @@ def best_kde(data, n_iters=20):
 def pair(data, mem=None, labels=None):
     df = pd.DataFrame(data)
     if (data.shape[1] == 3):
-        df.columns = ['pmra', 'pmdec', 'log10_parallax']
+        df.columns = ['pmra', 'pmdec', 'parallax']
     elif (data.shape[1] == 5):
-        df.columns = ['pmra', 'pmdec', 'log10_parallax', 'ra', 'dec']
+        df.columns = ['pmra', 'pmdec', 'parallax', 'ra', 'dec']
     else:
         raise Exception('wrong col number')
     if mem is None and labels is None:
@@ -135,8 +135,8 @@ def membership(
         mem2[:,label+1] = gaussian_kde(population.T).pdf(scaled.T)
         mem[:,label+1] = HKDE().fit(
             data=population,
-            errors=errors[cl_result.hdbscan.labels_==label],
-            corr=corr[cl_result.hdbscan.labels_==label],
+            errors=None if errors is None else errors[cl_result.hdbscan.labels_==label],
+            corr=None if corr is None else corr[cl_result.hdbscan.labels_==label],
         ).pdf(scaled)
 
     mem = mem/np.atleast_2d(mem.sum(axis=1)).repeat(labels.shape[0], axis=0).T
