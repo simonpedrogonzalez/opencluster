@@ -231,6 +231,7 @@ class Cluster:
         validator=[ validators.instance_of(int), in_range(0, 'inf') ],
         default=200)
 
+    # TODO: fails when n is 1
     def rvs(self):
         size = self.star_count
         data = pd.DataFrame()
@@ -327,7 +328,7 @@ class Synthetic:
         if self.representation_type == 'spherical':
             xyz = data[['x', 'y', 'z']].to_numpy()
             data['ra'], data['dec'], data['parallax'] = cartesian_to_polar(xyz).T
-            data['log_parallax'] = np.log10(data['parallax'])
+            data['log10_parallax'] = np.log10(data['parallax'])
         return data
 
 
