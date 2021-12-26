@@ -30,11 +30,11 @@ from sklearn.manifold import TSNE
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KernelDensity
 from sklearn.model_selection import GridSearchCV
-# from pyclustertend import hopkins, ivat, vat
-from clustering_tendency import hopkins, dip
 from statsmodels.nonparametric.kernel_density import KDEMultivariate
 from KDEpy import FFTKDE
 from opencluster.kdeh import HKDE
+from sklearn.metrics import pairwise_distances
+
 
 """ class VariableBandiwthKDE:
     def fit(data):
@@ -88,6 +88,11 @@ class ClusteringResult:
 
 
 @attrs(auto_attribs=True)
+class Membership:
+    probabilities: np.ndarray
+    clustering: HDBSCAN
+
+@attrs(auto_attribs=True)
 class MembershipResult:
     probabilities: np.ndarray
     hopkins_metric: float
@@ -111,7 +116,7 @@ def membership(
         scaled = data
     
     print('hopkins')
-    hopkins_metric = hopkins(scaled)
+    #hopkins_metric = hopkins(scaled)
 
     if hopkins_threshold is not None and hopkins_metric < hopkins_threshold:
         return MembershipResult(
@@ -134,15 +139,15 @@ def membership(
         # mem[:,label+1] = np.exp(KernelDensity().fit(population).score_samples(scaled))
         mem2[:,label+1] = gaussian_kde(population.T).pdf(scaled.T)
         mem[:,label+1] = HKDE().fit(
-            data=population,
+            data=data[cl_result.hdbscan.labels_ == label],
             errors=None if errors is None else errors[cl_result.hdbscan.labels_==label],
             corr=None if corr is None else corr[cl_result.hdbscan.labels_==label],
-        ).pdf(scaled)
+        ).pdf(data)
 
     mem = mem/np.atleast_2d(mem.sum(axis=1)).repeat(labels.shape[0], axis=0).T
     mem2 = mem2/np.atleast_2d(mem2.sum(axis=1)).repeat(labels.shape[0], axis=0).T
 
-    pair(scaled, mem[:,1], cl_result.hdbscan.labels_)
+    pair(data, mem[:,1], cl_result.hdbscan.labels_)
     plt.show()
 
     return MembershipResult(
@@ -157,7 +162,7 @@ def membership(
 def hdbscan(data, star_count, n_clusters: str='dip'):
 
     print('dip')
-    diptest_pval = dip(data)
+    #diptest_pval = dip(data)
 
     print('hdbscan')
     if (diptest_pval <= .1):
@@ -179,7 +184,52 @@ def hdbscan(data, star_count, n_clusters: str='dip'):
         prediction_data=True,
     ).fit(data)
     return ClusteringResult(single_cluster_result, diptest_pval)
-    
+
+def calculate_membership(
+    data: np.ndarray,
+    labels: np.ndarray,
+    err: np.ndarray = None,
+    corr: np.ndarray = None,
+    ):
+    obs, dims = data.shape
+
+    unique_labels = np.unique(labels)
+
+    if len(unique_labels) == 1:
+        return np.atleast_2d(np.ones(obs)).T
+
+    d = np.zeros((obs, len(unique_labels)))
+
+    for label in unique_labels:
+        population = data[labels==label]
+        d[:,label+1] = HKDE().fit(
+            data=population,
+            errors=None if err is None else err[labels==label],
+            corr=None if corr is None else corr[labels==label],
+        ).pdf(data)
+    p = d/np.atleast_2d(d.sum(axis=1)).repeat(len(unique_labels), axis=0).T
+    return p
+
+def membership2(
+    data: np.ndarray,
+    star_count: int, 
+    errors: np.ndarray = None,
+    corr: np.ndarray = None,
+    hopkins_threshold:float=.6,
+    scaler=RobustScaler(),
+    e: Union[float, int] = 10,
+    ):
+    r = membership(data, star_count, errors, corr, hopkins_threshold, scaler)
+    ns = r.probabilities.sum(axis=0)
+    old_ns = np.zeros_like(ns) + np.array([data.shape[0]-star_count, star_count])
+    while(np.any(old_ns - ns > 1)):
+        r = membership(data, ns[1], errors, corr, hopkins_threshold, scaler)
+        old_ns = ns
+        ns = r.probabilities.sum(axis=0)
+        print(old_ns)
+        print(ns)
+    return r
+
     """ df = pd.DataFrame(data)
     df.columns = ['pmra', 'pmdec', 'parallax']
     df['label'] = res.labels_
@@ -190,7 +240,172 @@ def hdbscan(data, star_count, n_clusters: str='dip'):
     #outlier_scores = res.outlier_scores_
     #memberships = cluster_memberships
     # memberships = np.insert(cluster_memberships, 1, outlier_scores, 1)
+
+def cluster(
+    data: np.ndarray,
+    min_cluster_size: int,
+    min_samples: int,
+    single_cluster: bool=None,
+    *args,
+    **kwargs,
+    ):
     
+    if single_cluster != True:
+        multiple_clusters_result = HDBSCAN(
+                min_cluster_size=min_cluster_size,
+                min_samples=min_samples,
+                *args, **kwargs,
+            ).fit(data)
+        labels = np.unique(multiple_clusters_result.labels_)
+        if single_cluster == False or len(labels) != 1:
+            return multiple_clusters_result
+
+    single_cluster_result = HDBSCAN(
+        min_cluster_size=min_cluster_size,
+        allow_single_cluster=True,
+        min_samples=min_samples,
+        *args, **kwargs,
+    ).fit(data)
+
+    return single_cluster_result
+
+def cluster2(
+    data: np.ndarray,
+    min_cluster_size: int,
+    min_samples: int,
+    single_cluster: bool=None,
+    *args,
+    **kwargs,
+    ):
+    
+    if single_cluster != True:
+        multiple_clusters_result = HDBSCAN(
+                min_cluster_size=min_cluster_size,
+                min_samples=min_samples,
+                *args, **kwargs,
+            ).fit(data)
+        labels = np.unique(multiple_clusters_result.labels_)
+        if single_cluster == False or len(labels) != 1:
+            return multiple_clusters_result
+
+    single_cluster_result = HDBSCAN(
+        min_cluster_size=min_cluster_size,
+        allow_single_cluster=True,
+        min_samples=min_samples,
+        *args, **kwargs,
+    ).fit(data)
+
+    return single_cluster_result
+
+# TODO: include distance metric as parameter and the precomputed option
+def membership3(
+    data: np.ndarray,
+    min_cluster_size: int, 
+    single_cluster: bool = None,
+    err: np.ndarray = None,
+    corr: np.ndarray = None,
+    scaler=RobustScaler(),
+    n_iters: int = 1,
+    mix_err: float = .01,
+    dist: Union[str, np.ndarray] = 'mahalanobis',
+    ):
+
+    obs, dims = data.shape
+    if scaler is not None:
+        scaled = scaler.fit(data).transform(data)
+    else:
+        scaled = data
+    
+    if isinstance(dist, str):
+        dist_matrix = pairwise_distances(scaled, metric=dist)
+    else:
+        assert dist.shape == (obs, obs)
+        dist_matrix = dist
+
+    min_samples = min_cluster_size
+
+    c = cluster(
+        dist_matrix,
+        int(min_cluster_size),
+        int(min_samples),
+        single_cluster,
+        metric='precomputed')
+    p = calculate_membership(data, c.labels_, err, corr)
+    
+    i = 1
+
+    unique_labels = np.unique(c.labels_)
+
+    previous_mix = np.zeros_like(unique_labels) + \
+        np.array([obs-min_cluster_size, min_cluster_size]) / obs
+    
+    p_sum_per_label = p.sum(axis=0)
+    current_mix = p_sum_per_label / obs
+    min_cluster_size = p_sum_per_label[1:].min()
+    
+    while((i < n_iters) and (np.any(np.abs(previous_mix - current_mix) > mix_err))):
+        c = cluster(
+            dist_matrix,
+            int(min_cluster_size),
+            int(min_samples),
+            single_cluster,
+            metric='precomputed')
+        p = calculate_membership(data, c.labels_, err, corr)
+        i += 1
+        previous_mix = np.copy(current_mix)
+        p_sum_per_label = p.sum(axis=0)
+        current_mix = p_sum_per_label / obs
+        min_cluster_size = p_sum_per_label[1:].min()
+
+    return Membership(clustering=c, probabilities=p)
+
+
+def membership4(
+    data: np.ndarray,
+    min_cluster_size: int, 
+    single_cluster: bool = None,
+    err: np.ndarray = None,
+    corr: np.ndarray = None,
+    scaler=RobustScaler(),
+    n_iters: int = 100,
+    min_iter_diff: float = .01,
+    dist: Union[str, np.ndarray] = 'mahalanobis',
+    ):
+
+    obs, dims = data.shape
+    if scaler is not None:
+        scaled = scaler.fit(data).transform(data)
+    else:
+        scaled = data
+    
+    if isinstance(dist, str):
+        dist_matrix = pairwise_distances(scaled, metric=dist)
+    else:
+        assert dist.shape == (obs, obs)
+        dist_matrix = dist
+
+    min_samples = min_cluster_size
+
+    c = cluster(
+        dist_matrix,
+        int(min_cluster_size),
+        int(min_samples),
+        single_cluster,
+        metric='precomputed')
+    
+    previous_labels = c.labels_
+
+    for i in range(n_iters):
+        p = calculate_membership(data, previous_labels, err, corr)
+        maxs = np.max(p[:,1:], axis=1)
+        labels = np.argmax(p[:,1:], axis=1)
+        labels[maxs < .5] = -1
+        if np.alltrue(np.equal(previous_labels, labels)):
+            break
+        previous_labels = np.copy(labels)
+
+    return Membership(clustering=c, probabilities=p)
+
 """  projection = TSNE().fit_transform(data)
     color_palette = sns.color_palette('Paired', 12)
     alphas = memberships
