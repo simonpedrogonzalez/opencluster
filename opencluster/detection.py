@@ -168,7 +168,7 @@ def find_clusters(
     nyquist_offset=True,
     min_count:Union[int, float]=5,
     min_dif:Union[int, float]=10,
-    min_sigma_dif:Union[int, float]=3,
+    min_sigma_dif:Union[int, float]=None,
     min_significance:Union[int, float]=1,
     max_num_peaks:Union[int, float]=np.inf,
     min_interpeak_dist:Union[int, float]=1,
@@ -205,7 +205,7 @@ def find_clusters(
         peak_detection_params['threshold_abs'] = min_significance
     if max_num_peaks:
         peak_detection_params['num_peaks'] = max_num_peaks
-    if np.any(hist.shape) < 3:
+    if np.any(np.array(hist.shape) < 3):
         warn(f'histogram has too few bins in some dimensions: hist shape is {hist.shape}')
         peak_detection_params['exclude_border'] = False
 
