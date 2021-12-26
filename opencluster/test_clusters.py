@@ -6,6 +6,9 @@ from opencluster.synthetic import *
 from opencluster.detection import *
 from opencluster.membership import *
 from opencluster.fetcher import *
+from opencluster.clustering_tendency import *
+from sklearn.preprocessing import RobustScaler
+
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -88,20 +91,21 @@ test_clusters = [
 
 
 # data downloading
-""" 
-for i in range(len(test_clusters)):
+
+""" for i in range(len(test_clusters)):
+    i +=2
     cluster = test_clusters[i]
     radius = cluster.get('area_radius')*u.deg
     filters = cluster.get('filters')
- """
-    # center
-""" simbad_search(
-        cluster.get('name'),
-        dump_to_file=True,
-        output_file=f'/home/simon/repos/opencluster/scripts/data/meta-{cluster.get("name")}.vot'
-        ) """
 
-""" print('counting...')
+    # center
+    simbad_search(
+            cluster.get('name'),
+            dump_to_file=True,
+            output_file=f'/home/simon/repos/opencluster/scripts/data/meta-{cluster.get("name")}.vot'
+            )
+
+    print('counting...')
     # count before download!!!
     count_query_result = (
             query_region(name=cluster.get('name'), radius=radius)
@@ -117,10 +121,10 @@ for i in range(len(test_clusters)):
     table = OCTable((
             query_region(name=cluster.get('name'), radius=radius)
             .select([
-                'ra', 'dec', 'ra_dec_corr',
+                'ra', 'dec', 'ra_error', 'dec_error', 'ra_dec_corr',
                 'pmra', 'pmra_error', 'ra_pmra_corr', 'dec_pmra_corr',
                 'pmdec', 'pmdec_error', 'ra_pmdec_corr', 'dec_pmdec_corr', 'pmra_pmdec_corr',
-                'parallax', 'parallax_error', 'parallax_pmra_corr', 'parallax_pmdec_corr',
+                'parallax', 'parallax_error', 'parallax_pmra_corr', 'parallax_pmdec_corr',  'ra_parallax_corr', 'dec_parallax_corr',
                 'phot_g_mean_mag'
             ])
             .where(filters)
@@ -132,51 +136,71 @@ for i in range(len(test_clusters)):
     table.write_to(f'/home/simon/repos/opencluster/scripts/data/clusters/{cluster.get("name")}.vot')
     print(f'{cluster.get("name")} ready') """
 
-i = 5
+i = 0
 cluster = test_clusters[i]
 
 print('reading file')
 table = load_file(f'/home/simon/repos/opencluster/scripts/data/clusters/{cluster.get("name")}.vot')
 data = table.to_pandas()
 
-detection_data = data[['pmra', 'pmdec', 'parallax']].to_numpy()
-bin_shape = [.5, .5, .5]
-# detection_data[:,2] = np.log10(detection_data[:,2])
-# bin_shape = [.5, .5, .05]
+detection_vars = ['pmra', 'pmdec', 'log10_parallax']
+bin_shape = [.5, .5, .05]
 
 print('detecting')
 
 
 res = find_clusters(
-    data=detection_data,
+    data=data[detection_vars].to_numpy(),
     bin_shape=bin_shape,
-    mask=default_mask(3)
+    mask=default_mask(3),
+    min_sigma_dif=None,
 )
 
 sigma_multiplier = 1.5
 print('subseting')
+
 coords = []
 subsets = []
-error_vars = ['pmra_error', 'pmdec_error', 'parallax_error']
-# order of corr variables
-# 12
-# 13 23 
-# 14 24 34
-corr_vars = ['pmra_pmdec_corr', 'parallax_pmra_corr', 'parallax_pmdec_corr']
-# data['log_parallax'] = np.log10(data['parallax'].to_numpy())
-# check_data = data[['pmra', 'pmdec', 'log_parallax', 'ra', 'dec']].to_numpy()
 
-check_data = data[['pmra', 'pmdec', 'parallax', 'ra', 'dec']+error_vars+corr_vars].to_numpy()
+subset_vars = list(dict.fromkeys(['pmra', 'pmdec', 'log10_parallax'] + list(data.columns)))
+subset_data = data[subset_vars].to_numpy()
 
 for i, peak in enumerate(res.peaks):
     limits = np.vstack((peak.center-peak.sigma*sigma_multiplier, peak.center+peak.sigma*sigma_multiplier)).T
-    s = subset(check_data, limits)
+    s = subset(subset_data, limits)
     subsets.append(s)
-    coords.append((np.median(s[:,3]), np.median(s[:,4])))
-    print('membership')
-    res2 = membership(
-        data=s[:,:3],
-        star_count=peak.count,
-        errors=s[:,5:8],
-        corr=s[:,8:11],
-        )
+    df = pd.DataFrame(s)
+    df.columns = subset_vars
+    coords.append((df['ra'].median(), df['dec'].median()))
+    mcolnames = Colnames(subset_vars)
+    mdata = df[mcolnames.var_err_corr].to_numpy()
+    mcorr = df[mcolnames.corr].to_numpy()
+    merr = df[mcolnames.err].to_numpy()
+    
+    print('testing')
+    """ pm = df[['pmra', 'pmdec']].to_numpy()
+    pm_plx = df[['pmra', 'pmdec', 'parallax']].to_numpy()
+    spatial = df[['ra', 'dec']].to_numpy()
+    pm_plx_spatial = df[['pmra', 'pmdec', 'parallax', 'ra', 'dec']].to_numpy()
+    test_data = { 'pm': pm, 'pm_plx': pm_plx, 'spatial': spatial, 'pm_plx_spatial': pm_plx_spatial }
+    for (k,v) in test_data.items():
+        test_data[k] = RobustScaler().fit(v).transform(v)
+    test_data_2d = { k:test_data[k] for k in ['pm', 'spatial'] }
+    test_funcs = { 'h': HopkinsTest(), 'd': DipTest() }
+    test_cases = dict_combinations([test_data, test_funcs])
+    test_cases_2d = dict_combinations([test_data_2d, { 'r': RipleysKTest() } ])
+    results = []
+    for test in (test_cases + test_cases_2d):
+        datak = list(test[0].keys())[0]
+        funck = list(test[1].keys())[0]
+        data = list(test[0].values())[0]
+        func = list(test[1].values())[0]
+        results.append((datak, funck, func.test(data))) """
+
+    res2 = membership4(
+        data=mdata,
+        min_cluster_size=peak.count,
+        err=merr,
+        corr=mcorr,
+    )
+    print(res2)
