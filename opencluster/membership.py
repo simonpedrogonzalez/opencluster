@@ -75,7 +75,7 @@ def pair(data, mem=None, labels=None):
     else:
         hue = labels
     return sns.pairplot(
-        df, plot_kws={'hue': hue },
+        df, plot_kws={'hue': hue , 'hue_norm': (0,1)},
         diag_kind='kde', diag_kws={'hue':labels},
         corner=True,
         ).map_lower(sns.kdeplot, levels=4, color=".1")
@@ -138,10 +138,12 @@ def membership(
         print(f'kde for label {label}')
         # mem[:,label+1] = np.exp(KernelDensity().fit(population).score_samples(scaled))
         mem2[:,label+1] = gaussian_kde(population.T).pdf(scaled.T)
+        corr_param = corr if not isinstance(corr, np.ndarray) else corr[cl_result.hdbscan.labels_==label]
+        err = None if errors is None else errors[cl_result.hdbscan.labels_==label]
         mem[:,label+1] = HKDE().fit(
             data=data[cl_result.hdbscan.labels_ == label],
-            errors=None if errors is None else errors[cl_result.hdbscan.labels_==label],
-            corr=None if corr is None else corr[cl_result.hdbscan.labels_==label],
+            err=err,
+            corr=corr_param,
         ).pdf(data)
 
     mem = mem/np.atleast_2d(mem.sum(axis=1)).repeat(labels.shape[0], axis=0).T
@@ -189,7 +191,9 @@ def calculate_membership(
     data: np.ndarray,
     labels: np.ndarray,
     err: np.ndarray = None,
-    corr: np.ndarray = None,
+    corr: Union[np.ndarray, str]='auto',
+    *args,
+    **kwargs,
     ):
     obs, dims = data.shape
 
@@ -204,9 +208,13 @@ def calculate_membership(
         population = data[labels==label]
         d[:,label+1] = HKDE().fit(
             data=population,
-            errors=None if err is None else err[labels==label],
-            corr=None if corr is None else corr[labels==label],
+            err=None if err is None else err[labels==label],
+            corr=corr if isinstance(corr, str) else corr[labels==label],
+            *args,**kwargs,
         ).pdf(data)
+
+    # safe divide??
+    #p = np.e**(np.log(d) - np.log(np.atleast_2d(d.sum(axis=1)).repeat(len(unique_labels), axis=0).T))
     p = d/np.atleast_2d(d.sum(axis=1)).repeat(len(unique_labels), axis=0).T
     return p
 
@@ -363,13 +371,15 @@ def membership3(
 def membership4(
     data: np.ndarray,
     min_cluster_size: int, 
-    single_cluster: bool = None,
+    single_cluster: bool = True,
     err: np.ndarray = None,
-    corr: np.ndarray = None,
+    corr: Union[np.ndarray, str] = 'auto',
     scaler=RobustScaler(),
     n_iters: int = 100,
     min_iter_diff: float = .01,
     dist: Union[str, np.ndarray] = 'mahalanobis',
+    *args,
+    **kwargs,
     ):
 
     obs, dims = data.shape
@@ -396,7 +406,7 @@ def membership4(
     previous_labels = c.labels_
 
     for i in range(n_iters):
-        p = calculate_membership(data, previous_labels, err, corr)
+        p = calculate_membership(data, previous_labels, err, corr, *args, **kwargs)
         maxs = np.max(p[:,1:], axis=1)
         labels = np.argmax(p[:,1:], axis=1)
         labels[maxs < .5] = -1
