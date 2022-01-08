@@ -28,6 +28,7 @@ from scipy.stats import gaussian_kde
 from sklearn.preprocessing import RobustScaler
 from statsmodels.nonparametric.kernel_density import KDEMultivariate
 from abc import abstractmethod
+import copy
 
 def pyvars2r(r, **kwargs):
     from rpy2.robjects import numpy2ri
@@ -78,10 +79,9 @@ class Bandwidth:
 @attrs(auto_attribs=True)
 class PluginBandwidth(Bandwidth):
     nstage: int = None
-    pilot: str = None
-    binned: bool = False
+    pilot: str = 'unconstr'
+    binned: bool = True
     diag: bool = False
-    amise: bool = False
     
     def H(self, data):
         from rpy2.robjects import r
@@ -104,7 +104,7 @@ class PluginBandwidth(Bandwidth):
         _, dims = data.shape
         r('library("ks")')
 
-        pyparams = self.__dict__
+        pyparams = copy.deepcopy(self.__dict__)
         # diag does not need to be passed as a param
         diag = pyparams.pop('diag')
         # save al parameters as variables
@@ -235,7 +235,10 @@ class HKDE:
         obs, dims = data.shape
         self.n = obs
         self.d = dims
+        print('getting cov')
         self.covariances = self.get_cov_matrices(data, err, corr)
+        
+        print('getting kern')
         self.kernels = [
             multivariate_normal(
                 data[i],
@@ -243,6 +246,7 @@ class HKDE:
                 *args, **kwargs,
             ) for i in range(obs)
         ]
+        print('done fit')
         return self
 
     def pdf(self, eval_points: np.ndarray, leave1out=False):
@@ -251,7 +255,7 @@ class HKDE:
         obs, dims = eval_points.shape
         if dims != self.d:
             raise ValueError('Eval points must have same dims as data.')
-        
+        print('eval')
         pdf = np.zeros(obs)
         if leave1out:
         # leave one out kde
@@ -315,6 +319,21 @@ def test_bandwidth():
     df = pd.DataFrame(data)
     sns.lineplot(data=df, x='var', y='bw', hue='func')
     print(s)
+
+def one_cluster_sample():
+    field = Field(
+    pm=stats.multivariate_normal(mean=(0., 0.), cov=20),
+    space=UniformSphere(center=polar_to_cartesian((120.5, -27.5, 5)),
+    radius=10), star_count=int(1e4))
+    clusters = [
+        Cluster(
+            space=stats.multivariate_normal(mean=polar_to_cartesian([120.7, -28.5, 5]), cov=.5),
+            pm=stats.multivariate_normal(mean=(.5, 0), cov=1./35),
+            star_count=200
+        ),
+    ]
+    df = Synthetic(field=field, clusters=clusters).rvs()
+    return df
 
 def test_hkde():
     field = Field(
@@ -389,4 +408,52 @@ def test_hkde():
     
     print('coso')
 
-test_hkde()
+def test_diff_bw_options():
+    df = one_cluster_sample()
+    d = df.to_numpy()[:,0:3]
+
+    x = d[:,0]
+    y = d[:,1]
+
+    obs, dims = d.shape
+    kde_default = HKDE().fit(d)
+    H_default = kde_default.covariances[0]
+    pdf_default = kde_default.pdf(d)
+    kde_unconstr = HKDE(bw=PluginBandwidth(pilot='unconstr')).fit(d)
+    H_unconstr = kde_unconstr.covariances[0]
+    pdf_unconstr = kde_default.pdf(d)
+    kde_binned = HKDE(bw=PluginBandwidth(binned=True)).fit(d)
+    H_binned = kde_binned.covariances[0]
+    pdf_binned = kde_default.pdf(d)
+
+    plt.figure()
+    sns.scatterplot(x,y,hue=pdf_default).set(title='default')
+    plt.figure()
+    sns.scatterplot(x,y,hue=pdf_binned).set(title='binned')
+    plt.figure()
+    sns.scatterplot(x,y,hue=pdf_unconstr).set(title='unconstr')
+    
+    plt.figure()
+    sns.histplot(pdf_default, bins=50).set(title='dens ks')
+    plt.figure()
+    sns.histplot(pdf_binned, bins=50).set(title='dens ks')
+    plt.figure()
+    sns.histplot(pdf_unconstr, bins=50).set(title='dens ks')
+    plt.show()
+    print('coso')    
+
+def test_performance():
+    df = one_cluster_sample()
+    s = df.to_numpy()[:,0:3]
+    obs, dims = s.shape
+    start_time = time.clock()
+    pdf = HKDE(bw=PluginBandwidth(binned=True, pilot='unconstr')).fit(s).pdf(s)
+    print('time ' + str(time.clock() - start_time))
+    x = s[:,0]
+    y = s[:,1]
+    plt.figure()
+    sns.scatterplot(x,y,hue=pdf).set(title='default')
+    plt.show()
+    print('coso')
+
+# test_performance()
