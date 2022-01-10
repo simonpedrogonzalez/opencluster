@@ -29,22 +29,8 @@ from sklearn.preprocessing import RobustScaler
 from statsmodels.nonparametric.kernel_density import KDEMultivariate
 from abc import abstractmethod
 import copy
-
-def pyvars2r(r, **kwargs):
-    from rpy2.robjects import numpy2ri
-    numpy2ri.activate()
-    params = ''
-    for key, value in kwargs.items():
-        if value is not None:   
-            if isinstance(value, (int, float, np.ndarray, str, bool)):
-                r.assign(key, value)
-                params += f'{key}={key},'
-            else:
-                raise ValueError('Unsuported py to r variable conversion.')
-    return params[:-1]
-
-def r2np(rmatrix, shape):
-    return np.array(list(rmatrix)).reshape(shape)
+from rpy2.robjects import r
+from rutils import *
 
 def rkde(data):
     from rpy2.robjects import r
@@ -84,44 +70,23 @@ class PluginBandwidth(Bandwidth):
     diag: bool = False
     
     def H(self, data):
-        from rpy2.robjects import r
-        from rpy2.robjects import packages as rpackages
-        from rpy2.robjects.packages import importr
+        
         #from rpy2.robjects import numpy2ri
         #numpy2ri.activate()
         #from rpy2.robjects.vectors import StrVector
         #rpackages_names = StrVector(('ks', ... ))
     
-        # prepare packages
-        try:
-            ks = importr('ks')
-        except error:
-            utils = rpackages.importr('utils')
-            utils.chooseCRANmirror(ind=1)
-            utils.install_packages('ks')
-            ks = importr('ks')
-        
         _, dims = data.shape
-        r('library("ks")')
+        params = copy.deepcopy(self.__dict__)
+        diag = params.pop('diag')
 
-        pyparams = copy.deepcopy(self.__dict__)
-        # diag does not need to be passed as a param
-        diag = pyparams.pop('diag')
-        # save al parameters as variables
-        rparams = pyvars2r(
-            r,
-            x=data,
-            **pyparams,
-        )
-
-        if diag:
-            return r2np(r(f'Hpi.diag({rparams})'), (dims, dims))
-        else:
-            return r2np(r(f'Hpi({rparams})'), (dims, dims))
-
-
-
-
+        # prepare packages
+        rhardload(r, ['ks'])
+        # delete all previous session variables
+        rclean(r, 'var')
+        _, rparams = pyargs2r(r, x=data, **params)
+        result = r(f'ks::Hpi{".diag" if diag else ""}({rparams})')
+        return r2np(result, (dims,dims))
 
 @attrs(auto_attribs=True)
 class HKDE:
@@ -443,17 +408,10 @@ def test_diff_bw_options():
     print('coso')    
 
 def test_performance():
-    df = one_cluster_sample()
+    # it takes about 
+    df = three_clusters_sample(int(1e6))
     s = df.to_numpy()[:,0:3]
     obs, dims = s.shape
-    start_time = time.clock()
-    pdf = HKDE(bw=PluginBandwidth(binned=True, pilot='unconstr')).fit(s).pdf(s)
-    print('time ' + str(time.clock() - start_time))
-    x = s[:,0]
-    y = s[:,1]
-    plt.figure()
-    sns.scatterplot(x,y,hue=pdf).set(title='default')
-    plt.show()
-    print('coso')
+    pdf = HKDE().fit(s).pdf(s)
 
 # test_performance()
