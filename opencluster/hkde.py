@@ -204,13 +204,13 @@ class HKDE:
         self.covariances = self.get_cov_matrices(data, err, corr)
         
         print('getting kern')
-        self.kernels = [
+        self.kernels = np.array([
             multivariate_normal(
                 data[i],
                 self.covariances[i],
                 *args, **kwargs,
             ) for i in range(obs)
-        ]
+        ])
         print('done fit')
         return self
 
@@ -409,7 +409,7 @@ def test_diff_bw_options():
 
 def test_performance():
     # it takes about 
-    df = three_clusters_sample(int(1e6))
+    df = three_clusters_sample(int(1e5))
     s = df.to_numpy()[:,0:3]
     obs, dims = s.shape
     pdf = HKDE().fit(s).pdf(s)

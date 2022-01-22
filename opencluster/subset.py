@@ -33,7 +33,7 @@ from sklearn.neighbors import KernelDensity
 from sklearn.model_selection import GridSearchCV
 from statsmodels.nonparametric.kernel_density import KDEMultivariate
 from KDEpy import FFTKDE
-from opencluster.kdeh import HKDE
+from opencluster.hkde import HKDE
 from sklearn.metrics import pairwise_distances
 
 from abc import abstractmethod

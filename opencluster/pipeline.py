@@ -6,7 +6,7 @@ from opencluster.fetcher import load_file
 from opencluster.synthetic import *
 from opencluster.detection import *
 from opencluster.membership import *
-from opencluster.kdeh import *
+from opencluster.hkde import *
 from opencluster.subset import *
 from opencluster.clustering_tendency import *
 import matplotlib.pyplot as plt
@@ -37,7 +37,7 @@ from sklearn.neighbors import KernelDensity
 from sklearn.model_selection import GridSearchCV
 from statsmodels.nonparametric.kernel_density import KDEMultivariate
 from KDEpy import FFTKDE
-from opencluster.kdeh import HKDE
+from opencluster.hkde import HKDE, one_cluster_sample
 from sklearn.metrics import pairwise_distances
 import pandas as pd
 from bayes_opt import BayesianOptimization
@@ -53,7 +53,7 @@ class Pipeline:
 @attrs(auto_attribs=True)
 class PMPlxPipeline(Pipeline):
 
-    def process(self, df):
+    def process(self, df, cluster_count=3):
         # only usable columns are going to be used
         # other data is going to be ignored
 
@@ -71,6 +71,7 @@ class PMPlxPipeline(Pipeline):
             bin_shape=bin_shape,
             mask=default_mask(3),
             min_sigma_dif=None,
+            max_num_peaks=cluster_count,
             )
         
         sigma_multiplier = 1.5
@@ -95,38 +96,48 @@ class PMPlxPipeline(Pipeline):
 
         membership_data = df[membership_cols].to_numpy()
         
-        global_p = np.atleast_2d(np.zeros(obs)).T
+        global_p = []
         for i, peak in enumerate(res.peaks):
             limits = np.vstack((
                 peak.center-peak.sigma*sigma_multiplier,
                 peak.center+peak.sigma*sigma_multiplier
             )).T
             
-            # recalculate center with kde
-            detection_subset = detection_data[RangeMasker(limits).mask(detection_data)]
-            scaler = RobustScaler().fit(detection_subset)
-            kde = gaussian_kde(scaler.transform(detection_subset).T)
-            # could also use mean shift
-            optimizer = BayesianOptimization(
-                lambda x,y,z: kde.pdf((x, y, z))[0],
-                { 'x': limits[0], 'y': limits[1], 'z': limits[2] },
-                verbose=0,
-            )
-            optimizer.maximize()
-            max_params = optimizer.max.get('params')
-            center = scaler.inverse_transform(
-                np.array(
-                    (max_params.get('x'), max_params.get('y'), max_params.get('z'))
-                ).reshape(1,-1)
-            ).ravel()
-            inside_pm_limits = CenterMasker((center[0], center[1]), bin_shape[0]).mask(detection_data)
-            inside_log10_plx_limits = RangeMasker(
-                [[center[2]-bin_shape[2], center[2]+bin_shape[2]]]
-            ).mask(np.atleast_2d(detection_data[:,2]).T)
-            
-            membership_mask = inside_pm_limits & inside_log10_plx_limits
+            detection_mask = RangeMasker(limits).mask(detection_data)
+            detection_subset = detection_data[detection_mask]
 
+
+            # remove next 2 lines if want to use center recalculation
+            membership_mask = detection_mask
             membership_subset = membership_data[membership_mask]
+
+            
+            # recalculate center with kde
+            #scaler = RobustScaler().fit(np.vstack((detection_subset, limits.T)))
+            #scaled_data = scaler.transform(detection_subset).T
+            #scaled_limits = scaler.transform(limits.T).T
+            #kde = gaussian_kde(scaled_data)
+            # could also use mean shift
+            #optimizer = BayesianOptimization(
+            #    lambda x,y,z: kde.pdf((x, y, z))[0],
+            #    { 'x': scaled_limits[0], 'y': scaled_limits[1], 'z': scaled_limits[2] },
+            #    verbose=0,
+            #)
+            #optimizer.maximize()
+            #max_params = optimizer.max.get('params')
+            #center = scaler.inverse_transform(
+            #    np.array(
+            #        (max_params.get('x'), max_params.get('y'), max_params.get('z'))
+            #    ).reshape(1,-1)
+            #).ravel()
+            #inside_pm_limits = CenterMasker((center[0], center[1]), bin_shape[0]).mask(detection_data)
+            #inside_log10_plx_limits = RangeMasker(
+            #    [[center[2]-bin_shape[2], center[2]+bin_shape[2]]]
+            #).mask(np.atleast_2d(detection_data[:,2]).T)
+            
+            #membership_mask = inside_pm_limits & inside_log10_plx_limits
+
+            #membership_subset = membership_data[membership_mask]
 
             data = membership_subset[:,:n_vars]
             if not missing_err:
@@ -134,38 +145,28 @@ class PMPlxPipeline(Pipeline):
             if not missing_corr:
                 corr = subset[:,n_vars+n_errs:n_vars+n_errs+n_corrs]            
             
-            p = membership4(data, peak.count, err=err, corr=corr).probabilities
+            p = membership5(data, peak.count, n_iters=1, err=err, corr=corr).probabilities
             region_obs, n_classes = p.shape
             n_clusters = n_classes - 1
 
-            region_p = global_p[membership_mask]
-            region_p[:,0] = p[:,0]
-
-            if n_clusters > 0:
-                i_inf = global_p.shape[1]
-                i_sup = i_inf + p.shape[1] - 1
-                region_p = np.hstack((region_p, np.empty((region_obs, n_clusters))))
-                region_p[:,1:] = p[:,1:]
-                global_p = np.hstack((global_p, np.zeros((obs, n_clusters))))
+            # add each found cluster probs
+            for n_c in range(n_clusters):
+                cluster_p = np.zeros(obs)
+                cluster_p[membership_mask] = p[:,n_c+1]
+                global_p.append(cluster_p)
             
-            global_p[membership_mask] = region_p
+        # add row for field prob
+        global_p = np.array(global_p).T
+        _, total_clusters = global_p.shape
+        result = np.empty((obs, total_clusters+1))
+        result[:,1:] = global_p
+        result[:,0] = 1 - global_p.sum(axis=1)
 
-        return global_p
+        return result
 
 
 def test_PMPlxPipeline():
-    field = Field(
-    pm=stats.multivariate_normal(mean=(0., 0.), cov=20),
-    space=UniformSphere(center=polar_to_cartesian((120.5, -27.5, 5)),
-    radius=10), star_count=int(1e3))
-    clusters = [
-        Cluster(
-            space=stats.multivariate_normal(mean=polar_to_cartesian([120.7, -28.5, 5]), cov=.5),
-            pm=stats.multivariate_normal(mean=(.5, 0), cov=1./35),
-            star_count=200
-        ),
-    ]
-    df = Synthetic(field=field, clusters=clusters).rvs()
+    df = three_clusters_sample()
 
     p = PMPlxPipeline().process(df)
     _, n_clus = p.shape
@@ -184,4 +185,4 @@ def test_PMPlxPipeline():
     plt.show()
     print('coso')
 
-test_PMPlxPipeline()
+# test_PMPlxPipeline()

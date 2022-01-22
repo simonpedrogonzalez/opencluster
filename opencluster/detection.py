@@ -419,3 +419,23 @@ find_clusters(original_data, bin_shape=[.5, .5, .05], mask=mask) """
 """ filtered2 = convolve(data, mask=mask)
 variance2 = ndimage.generic_filter(data, function=np.var, size=(5,5,5))
 variance = convolve(data, c_filter=ndimage.generic_filter, function=np.var, size = (5,5,5)) """
+
+def test_detection():
+    n_field = int(1e3)
+    min_f, max_f = (0, 10)
+    min_c, max_c = (4.5, 5.5)
+    dens_f = n_field/(max_f - min_f)**3
+    n_cluster = int(1e2)
+    dens_c = n_cluster/(max_c - min_c)**3
+
+    field = np.random.uniform(min_f, max_f, (n_field, 3))
+    cluster = np.random.uniform(min_c, max_c, (n_cluster, 3))
+    data = np.vstack((field, cluster))
+    sns.scatterplot(data[:,0], data[:,1])
+    res = find_clusters(data, [1,1,1])
+    print(res.peaks[0])
+    print('coso')
+
+# test_detection()
+
+    

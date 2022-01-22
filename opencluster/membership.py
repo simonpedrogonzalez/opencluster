@@ -1,6 +1,7 @@
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname('opencluster'), '.'))
+from sklearn.metrics import confusion_matrix, accuracy_score, normalized_mutual_info_score
 
 from opencluster.fetcher import load_file
 from opencluster.synthetic import *
@@ -32,33 +33,8 @@ from sklearn.neighbors import KernelDensity
 from sklearn.model_selection import GridSearchCV
 from statsmodels.nonparametric.kernel_density import KDEMultivariate
 from KDEpy import FFTKDE
-from opencluster.kdeh import HKDE
+from opencluster.hkde import HKDE, PluginBandwidth
 from sklearn.metrics import pairwise_distances
-
-
-""" class VariableBandiwthKDE:
-    def fit(data):
-        dims = data.shape[1]
-        bandwidths = []
-        for i in range(dim):
-            estimate_bandwidth """
-
-def best_kde(data, n_iters=20):
-    #seperate into validation and training
-    #random_sample_size = data.shape[0]*.9
-    #train, test = train_test_split(data, test_size=random_sample_size, train_size=random_sample_size)
-    #1. now do the KDE with Gaussian kernel with cross validation
-    grid = GridSearchCV(
-        KernelDensity(),
-        { 'bandwidth': np.logspace(-1, 1, 20)}) # 20-fold cross-validation
-    #grid.fit(train_data)
-    grid.fit(data)
-    print("grid.best_params_: " + str(grid.best_params_))
-    #get the best estimator
-    #kde_gauss=grid.best_estimator_
-    #what is the likelihood of validation data
-    #kde_gauss.score(val_data)
-    return grid
 
 def pair(data, mem=None, labels=None):
     df = pd.DataFrame(data)
@@ -416,17 +392,92 @@ def membership4(
 
     return Membership(clustering=c, probabilities=p)
 
-"""  projection = TSNE().fit_transform(data)
-    color_palette = sns.color_palette('Paired', 12)
-    alphas = memberships
-    max_membership_colors = np.array([color_palette[np.argmax(x)] for x in memberships]) """
-    # max_membership_colors = np.insert(max_membership_colors, 1, alphas, 1)
+def membership5(
+    data: np.ndarray,
+    min_cluster_size: int, 
+    single_cluster: bool = True,
+    err: np.ndarray = None,
+    corr: Union[np.ndarray, str] = 'auto',
+    scaler=RobustScaler(),
+    n_iters: int = 100,
+    min_iter_diff: float = .01,
+    dist: Union[str, np.ndarray] = 'mahalanobis',
+    *args,
+    **kwargs,
+    ):
+
+    obs, dims = data.shape
+    if scaler is not None:
+        scaled = scaler.fit(data).transform(data)
+    else:
+        scaled = data
     
-    # sns.scatterplot(x=data[:,0], y=data[:,1], hue=res.labels_)
-"""  sns.scatterplot(x=projection[:,0], y=projection[:,1], c=max_membership_colors)
-    plt.show()
-    print(res) """
+    if isinstance(dist, str):
+        dist_matrix = pairwise_distances(scaled, metric=dist)
+    else:
+        assert dist.shape == (obs, obs)
+        dist_matrix = dist
+
+    min_samples = min_cluster_size
+
+    c = cluster(
+        dist_matrix,
+        int(min_cluster_size),
+        int(min_samples),
+        single_cluster,
+        metric='precomputed')
     
-    # another way: calculate 1-1 distances of all sample.
-    # order them from min to max
-    # plot it, find the point of most curvature
+    previous_labels = c.labels_
+
+    hkde = HKDE(bw=PluginBandwidth(binned=True, pilot='unconstr')).fit(
+        data=data,
+        err=None if err is None else err,
+        corr=corr,
+    )
+
+    for i in range(n_iters):
+
+        # calculate membership
+        unique_labels = np.unique(previous_labels)
+        if len(unique_labels) == 1:
+            p = np.atleast_2d(np.ones(obs)).T
+        else:
+            d = np.zeros((obs, len(unique_labels)))
+            for label in unique_labels:
+                # create kde per class but not recalculate every kernel and cov matrix
+                class_hkde = HKDE()
+                class_hkde.kernels = hkde.kernels[previous_labels==label]
+                class_hkde.covariances = hkde.covariances[previous_labels==label]
+                class_hkde.d = 3
+                class_hkde.n = hkde.kernels.shape[0]
+                d[:,label+1] = class_hkde.pdf(data, leave1out=True)
+                
+            p = d/np.atleast_2d(d.sum(axis=1)).repeat(len(unique_labels), axis=0).T
+        
+            # check if labels change between 2 iterations
+            maxs = np.max(p[:,1:], axis=1)
+            labels = np.argmax(p[:,1:], axis=1)
+            labels[maxs < .5] = -1
+            if np.alltrue(np.equal(previous_labels, labels)):
+                break
+            previous_labels = np.copy(labels)
+
+    return Membership(clustering=c, probabilities=p)
+
+
+def test_membership():
+    df = one_cluster_sample_small()
+    s = df.to_numpy()[:,0:3]
+    calculated_p = membership5(s, 200, n_iters=1).probabilities[:,1]
+    # compare
+    real_p = df['p_cluster1'].to_numpy()
+    real_labels = np.zeros_like(real_p)
+    real_labels[real_p >.5] = 1
+    calculated_labels = np.zeros_like(calculated_p)
+    calculated_labels[calculated_p > .5] = 1
+    acc = accuracy_score(real_labels, calculated_labels)
+    conf = confusion_matrix(real_labels, calculated_labels)
+    minfo = normalized_mutual_info_score(real_labels, calculated_labels)
+    print('coso')
+
+# test_membership()
