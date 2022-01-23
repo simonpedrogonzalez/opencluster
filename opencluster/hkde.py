@@ -7,6 +7,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname('opencluster'), '/home/simon/repos/opencluster'))
 from opencluster.fetcher import load_remote, simbad_search, load_file, remote_info
 from opencluster.synthetic import *
+
 import scipy.integrate as integrate
 import math
 from scipy.stats import norm
@@ -31,6 +32,27 @@ from abc import abstractmethod
 import copy
 from rpy2.robjects import r
 from rutils import *
+
+def pair(data, mem=None, labels=None):
+    df = pd.DataFrame(data)
+    if (data.shape[1] == 3):
+        df.columns = ['pmra', 'pmdec', 'parallax']
+    elif (data.shape[1] == 5):
+        df.columns = ['pmra', 'pmdec', 'parallax', 'ra', 'dec']
+    else:
+        raise Exception('wrong col number')
+    if mem is None and labels is None:
+        return sns.pairplot(df)
+    if mem is not None:
+        hue = np.round(mem, 2)
+    else:
+        hue = labels
+    return sns.pairplot(
+        df, plot_kws={'hue': hue , 'hue_norm': (0,1)},
+        diag_kind='kde', diag_kws={'hue':labels},
+        corner=True,
+        ).map_lower(sns.kdeplot, levels=4, color=".1")
+
 
 def rkde(data):
     from rpy2.robjects import r
@@ -96,6 +118,7 @@ class HKDE:
     n: int = None
     d: int = None
     bw: Union[Bandwidth, int, float] = PluginBandwidth()
+    weights: np.ndarray = None
 
     def get_sigmas(self, data: np.ndarray, err: np.ndarray):
         obs, dims = data.shape
@@ -195,9 +218,27 @@ class HKDE:
         data: np.ndarray,
         err: np.ndarray=None,
         corr: Union[np.ndarray, str]='auto',
+        weights: np.ndarray=None,
         *args, **kwargs
         ):
         obs, dims = data.shape
+        if weights is not None:
+            self.weights = weights
+        if self.weights is not None:
+            if len(self.weights.shape) != 1:
+                raise ValueError('Weights must be 1d np ndarray.')
+            if self.weights.shape[0] != obs:
+                raise ValueError('Weights must have same n as data.')
+            if np.any(self.weights > 1):
+                raise ValueError('Weight values must belong to [0,1].')
+            data = data[self.weights > 0]
+            self.weights = self.weights[self.weights > 0]
+            obs, dims = data.shape
+        else:
+            self.weights = np.ones(obs)
+
+        if obs == 0:
+            raise ValueError('Data matrix is empty or all points are weighted 0')
         self.n = obs
         self.d = dims
         print('getting cov')
@@ -226,13 +267,13 @@ class HKDE:
         # leave one out kde
             norm_factor = self.n-1
             for i, k in enumerate(self.kernels):
-                applied_k = k.pdf(eval_points)
+                applied_k = k.pdf(eval_points)# * self.weights[i]
                 applied_k[i] = 0
                 pdf += applied_k
         else:
             norm_factor = self.n
             for i, k in enumerate(self.kernels):
-                    applied_k = k.pdf(eval_points)
+                    applied_k = k.pdf(eval_points)# * self.weights[i]
                     pdf += applied_k
         if obs == 1:
             # return as float value
@@ -414,4 +455,15 @@ def test_performance():
     obs, dims = s.shape
     pdf = HKDE().fit(s).pdf(s)
 
-# test_performance()
+def test_weigths():
+    df = three_clusters_sample(1000)
+    s = df.to_numpy()[:,0:3]
+    obs, dims = s.shape
+    pdf1 = HKDE().fit(s, weights=np.ones(obs)).pdf(s)
+    # raises error
+    # pdf2 = HKDE().fit(s, weights=np.zeros(obs)).pdf(s)
+    pdf3 = HKDE().fit(s, weights=np.ones(obs)*.5).pdf(s)
+    assert np.allclose(pdf1, pdf3*2)
+    print('coso')
+
+test_weigths()
