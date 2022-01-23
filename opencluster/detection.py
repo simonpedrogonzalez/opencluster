@@ -150,9 +150,9 @@ def count_based_outlier_removal(data, bin_shape, mask, min_count):
     hist, edges = histogram(data, bin_shape)
     idcs = np.argwhere(hist>=min_count)
     idx_lim = np.vstack((idcs.min(axis=0), idcs.max(axis=0))).T
-
-    idx_lim[:,0] = np.clip(idx_lim[:,0]-mask.shape, 0, None)
-    idx_lim[:,1] = np.clip(idx_lim[:,1]+mask.shape, None, hist.shape)
+    half_mask_shape = np.ceil(np.array(mask.shape)/2)
+    idx_lim[:,0] = np.clip(idx_lim[:,0]-half_mask_shape, 0, None)
+    idx_lim[:,1] = np.clip(idx_lim[:,1]+half_mask_shape, None, hist.shape)
 
     value_lim = [(edges[i][idx_lim[i][0]], edges[i][min(idx_lim[i][1]+1, hist.shape[i])]) for i in range(dim)]
     data = subset(data, value_lim)
