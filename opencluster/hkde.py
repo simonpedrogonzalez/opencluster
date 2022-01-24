@@ -33,27 +33,6 @@ import copy
 from rpy2.robjects import r
 from rutils import *
 
-def pair(data, mem=None, labels=None):
-    df = pd.DataFrame(data)
-    if (data.shape[1] == 3):
-        df.columns = ['pmra', 'pmdec', 'parallax']
-    elif (data.shape[1] == 5):
-        df.columns = ['pmra', 'pmdec', 'parallax', 'ra', 'dec']
-    else:
-        raise Exception('wrong col number')
-    if mem is None and labels is None:
-        return sns.pairplot(df)
-    if mem is not None:
-        hue = np.round(mem, 2)
-    else:
-        hue = labels
-    return sns.pairplot(
-        df, plot_kws={'hue': hue , 'hue_norm': (0,1)},
-        diag_kind='kde', diag_kws={'hue':labels},
-        corner=True,
-        ).map_lower(sns.kdeplot, levels=4, color=".1")
-
-
 def rkde(data):
     from rpy2.robjects import r
     from rpy2.robjects import packages as rpackages
@@ -212,35 +191,39 @@ class HKDE:
             cross_sigmas = np.apply_along_axis(lambda x: x*np.atleast_2d(x).T, -1, sigmas)
             cov = cross_sigmas * corr_coefs
         return cov
-            
+    
+    def set_weigths(self, weights: np.ndarray):
+        if len(weights.shape) != 1:
+            raise ValueError('Weights must be 1d np ndarray.')
+        if np.any(weights > 1):
+            raise ValueError('Weight values must belong to [0,1].')
+        self.weights = weights
+        self.n = np.sum(self.weights)
+        return self
+
     def fit(
         self,
         data: np.ndarray,
         err: np.ndarray=None,
         corr: Union[np.ndarray, str]='auto',
-        weights: np.ndarray=None,
         *args, **kwargs
         ):
         obs, dims = data.shape
-        if weights is not None:
-            self.weights = weights
+        self.d = dims
+
         if self.weights is not None:
-            if len(self.weights.shape) != 1:
-                raise ValueError('Weights must be 1d np ndarray.')
             if self.weights.shape[0] != obs:
-                raise ValueError('Weights must have same n as data.')
-            if np.any(self.weights > 1):
-                raise ValueError('Weight values must belong to [0,1].')
+                raise ValueError('Data must have same n as weigths.')
             data = data[self.weights > 0]
             self.weights = self.weights[self.weights > 0]
             obs, dims = data.shape
         else:
             self.weights = np.ones(obs)
+            self.n = obs
 
         if obs == 0:
             raise ValueError('Data matrix is empty or all points are weighted 0')
-        self.n = obs
-        self.d = dims
+
         print('getting cov')
         self.covariances = self.get_cov_matrices(data, err, corr)
         
@@ -263,22 +246,22 @@ class HKDE:
             raise ValueError('Eval points must have same dims as data.')
         print('eval')
         pdf = np.zeros(obs)
-        if leave1out:
-        # leave one out kde
-            norm_factor = self.n-1
+        # put weigths and normalization toghether in each step
+        # pdf(point) = sum(ki(point)*wi/(sum(w)-wi))
+        norm_weigths = self.weights / (self.n-self.weights)
+        if leave1out:    
             for i, k in enumerate(self.kernels):
-                applied_k = k.pdf(eval_points)# * self.weights[i]
+                applied_k = k.pdf(eval_points) * norm_weigths[i]
                 applied_k[i] = 0
                 pdf += applied_k
         else:
-            norm_factor = self.n
             for i, k in enumerate(self.kernels):
-                    applied_k = k.pdf(eval_points)# * self.weights[i]
-                    pdf += applied_k
+                applied_k = k.pdf(eval_points) * norm_weigths[i]
+                pdf += applied_k
         if obs == 1:
             # return as float value
-            return (pdf/norm_factor)[0]
-        return pdf/norm_factor
+            return pdf[0]
+        return pdf
 
 def test_corr():
     obs = 3
@@ -456,14 +439,16 @@ def test_performance():
     pdf = HKDE().fit(s).pdf(s)
 
 def test_weigths():
+    np.random.seed(0)
     df = three_clusters_sample(1000)
     s = df.to_numpy()[:,0:3]
     obs, dims = s.shape
-    pdf1 = HKDE().fit(s, weights=np.ones(obs)).pdf(s)
+    pdf1 = HKDE().fit(s).pdf(s)
     # raises error
     # pdf2 = HKDE().fit(s, weights=np.zeros(obs)).pdf(s)
-    pdf3 = HKDE().fit(s, weights=np.ones(obs)*.5).pdf(s)
-    assert np.allclose(pdf1, pdf3*2)
+    pdf3 = HKDE().set_weigths(np.ones(obs)*.5).fit(s).pdf(s)
+    pdf4 = HKDE().set_weigths(np.ones(obs)*.5).fit(s).pdf(s, leave1out=True)
+    assert np.allclose(pdf1, pdf3)
     print('coso')
 
-test_weigths()
+# test_weigths()
