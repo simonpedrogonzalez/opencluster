@@ -7,7 +7,7 @@ from opencluster.detection import *
 from opencluster.membership import *
 from opencluster.hkde import *
 from opencluster.masker import *
-from opencluster.clustering_tendency import *
+from opencluster.stat_tests import *
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np

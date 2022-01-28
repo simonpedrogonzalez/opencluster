@@ -6,7 +6,7 @@ from opencluster.synthetic import *
 from opencluster.detection import *
 from opencluster.membership import *
 from opencluster.fetcher import *
-from opencluster.clustering_tendency import *
+from opencluster.stat_tests import *
 from sklearn.preprocessing import RobustScaler
 
 
