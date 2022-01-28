@@ -3,7 +3,6 @@ import os
 sys.path.append(os.path.join(os.path.dirname('opencluster'), '.'))
 from sklearn.metrics import confusion_matrix, accuracy_score, normalized_mutual_info_score
 
-from opencluster.fetcher import load_file
 from opencluster.synthetic import *
 import matplotlib.pyplot as plt
 import seaborn as sns
