@@ -152,7 +152,7 @@ opencluster/test.xml
 
 opencluster/range_sampling.py
 
-profile
+profile*
 
 typescript
 
@@ -160,6 +160,7 @@ typescript
 
 gitconfig
 opencluster/synthetic copy.py
+opencluster/membership copy.py
 
 
 docs/source/\{envtmpdir\}/html/.Rhistory
