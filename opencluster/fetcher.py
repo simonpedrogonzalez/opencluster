@@ -41,8 +41,10 @@ from attr import attrib, attrs, validators
 
 import numpy as np
 
+
 def default_table():
-    return 'gaiaedr3.gaia_source'
+    return "gaiaedr3.gaia_source"
+
 
 def checkargs(function):
     """Check arguments match their annotated type.
@@ -81,9 +83,20 @@ def checkargs(function):
 
 
 @checkargs
-def simbad_search(identifier: str, fields=['coordinates',
-    'parallax','propermotions','velocity', 'dimensions', 'diameter'], dump_to_file: bool =False,
-    output_file: str=None, **kwargs):
+def simbad_search(
+    identifier: str,
+    fields=[
+        "coordinates",
+        "parallax",
+        "propermotions",
+        "velocity",
+        "dimensions",
+        "diameter",
+    ],
+    dump_to_file: bool = False,
+    output_file: str = None,
+    **kwargs,
+):
     """Search an identifier in Simbad catalogues.
 
     Parameters
@@ -117,16 +130,16 @@ def simbad_search(identifier: str, fields=['coordinates',
         warnings.warn("Identifier not found.")
         return None
 
-    coord = ' '.join(
-        np.array(simbad.query_object(identifier)[['RA','DEC']])[0]
-        )
-    
+    coord = " ".join(
+        np.array(simbad.query_object(identifier)[["RA", "DEC"]])[0]
+    )
+
     if dump_to_file:
         if not output_file:
             output_file = identifier
         table = from_table(result)
         writeto(table=table, file=output_file)
-    
+
     return SkyCoord(coord, unit=(u.hourangle, u.deg)), result
 
 
@@ -380,9 +393,9 @@ class Query:
         """
         query = self.build()
 
-        print('launching query')
+        print("launching query")
         print(query)
-        print('this may take some time...')
+        print("this may take some time...")
 
         job = Gaia.launch_job_async(query=query, **kwargs)
         if not kwargs.get("dump_to_file"):
@@ -414,9 +427,9 @@ class Query:
                 ]
             )
             query += query_filters
-        print('launching query')
+        print("launching query")
         print(query)
-        print('this may take some time...')
+        print("this may take some time...")
         job = Gaia.launch_job_async(query=query, **kwargs)
 
         if not kwargs.get("dump_to_file"):
@@ -451,7 +464,11 @@ def query_region(*, ra=None, dec=None, name=None, coord=None, radius):
     """
     if not isinstance(radius, u.quantity.Quantity):
         raise ValueError("radious must be astropy.units.quantity.Quantity")
-    if not ((name is not None) ^ (ra is not None and dec is not None) ^ (coord is not None)):
+    if not (
+        (name is not None)
+        ^ (ra is not None and dec is not None)
+        ^ (coord is not None)
+    ):
         raise ValueError("'name' or 'ra' and 'dec' are required (not both)")
     if name is not None:
         if not isinstance(name, str):
@@ -645,4 +662,3 @@ class OCTable:
 
     def write_to(self, filepath):
         return writeto(self.table, filepath)
-
