@@ -254,6 +254,16 @@ class Cluster:
             space_pdf = self.space.pdf(xyz)
         return pm_pdf*space_pdf
 
+    def pmpdf(self, data):
+        return self.pm.pdf(data[['pmra', 'pmdec']].to_numpy())
+
+    def spacepdf(self, data):
+        if set(['x', 'y', 'z']).issubset(set(data.columns)):
+            space_pdf = self.space.pdf(data[['x' ,'y', 'z']].to_numpy())
+        else:
+            xyz = polar_to_cartesian(data['ra', 'dec', 'parallax'].to_numpy())
+            space_pdf = self.space.pdf(xyz)
+        return space_pdf
 
 @attrs(auto_attribs=True)
 class Field:
@@ -293,6 +303,17 @@ class Field:
             space_pdf = self.space.pdf(xyz)
         return pm_pdf*space_pdf
 
+    def pmpdf(self, data):
+        return self.pm.pdf(data[['pmra', 'pmdec']].to_numpy())
+
+    def spacepdf(self, data):
+        if set(['x', 'y', 'z']).issubset(set(data.columns)):
+            space_pdf = self.space.pdf(data[['x' ,'y', 'z']].to_numpy())
+        else:
+            xyz = polar_to_cartesian(data['ra', 'dec', 'parallax'].to_numpy())
+            space_pdf = self.space.pdf(xyz)
+        return space_pdf
+
 
 @attrs(auto_attribs=True)
 class Synthetic:
@@ -317,14 +338,38 @@ class Synthetic:
         total_stars = sum([c.star_count for c in self.clusters]) + self.field.star_count
         field_mixing_ratio = float(self.field.star_count)/float(total_stars)
         field_p = self.field.pdf(data)*field_mixing_ratio
+        
+        field_pmp = self.field.pmpdf(data)*field_mixing_ratio
+        field_spacep = self.field.spacepdf(data)*field_mixing_ratio
+
         clusters_mixing_ratios = [float(c.star_count)/float(total_stars) for c in self.clusters]
         cluster_ps = np.array([self.clusters[i].pdf(data)*clusters_mixing_ratios[i] for i in range(len(self.clusters))])
+        
+        cluster_pmps = np.array([self.clusters[i].pmpdf(data)*clusters_mixing_ratios[i] for i in range(len(self.clusters))])
+        cluster_spaceps = np.array([self.clusters[i].spacepdf(data)*clusters_mixing_ratios[i] for i in range(len(self.clusters))])
+
         total_p = cluster_ps.sum(axis=0) + field_p
+        total_pmp = cluster_pmps.sum(axis=0) + field_pmp
+        total_spacep = cluster_spaceps.sum(axis=0) + field_spacep
+
         total_clusters_probs = 0
+        total_clusters_pmprobs = 0
+        total_clusters_spaceprobs = 0
+
         for i in range(len(self.clusters)):
             data[f'p_cluster{i+1}'] = cluster_ps[i]/total_p
             total_clusters_probs += cluster_ps[i]/total_p
+
+            data[f'p_pm_cluster{i+1}'] = cluster_pmps[i]/total_pmp
+            total_clusters_pmprobs += cluster_pmps[i]/total_pmp
+
+            data[f'p_space_cluster{i+1}'] = cluster_spaceps[i]/total_spacep
+            total_clusters_spaceprobs += cluster_spaceps[i]/total_spacep
+
         data['p_field'] = 1 - total_clusters_probs
+        data['p_pm_field'] = 1 - total_clusters_pmprobs
+        data['p_space_field'] = 1 - total_clusters_spaceprobs
+
         if self.representation_type == 'spherical':
             xyz = data[['x', 'y', 'z']].to_numpy()
             data['ra'], data['dec'], data['parallax'] = cartesian_to_polar(xyz).T
@@ -371,7 +416,7 @@ def three_clusters_sample(field_size=int(1e4)):
     df = Synthetic(field=field, clusters=clusters).rvs()
     return df
 
-def one_cluster_sample_small(field_size=int(1e3)):
+def one_cluster_sample_small(field_size=int(1e3), cluster_size=int(2e2)):
     field = Field(
     pm=stats.multivariate_normal(mean=(0., 0.), cov=10),
     space=UniformSphere(center=polar_to_cartesian((120.5, -27.5, 5)),
@@ -380,7 +425,7 @@ def one_cluster_sample_small(field_size=int(1e3)):
         Cluster(
             space=stats.multivariate_normal(mean=polar_to_cartesian([120.7, -28.5, 5]), cov=.5),
             pm=stats.multivariate_normal(mean=(.5, 0), cov=1./35),
-            star_count=200
+            star_count=cluster_size
         ),
     ]
     df = Synthetic(field=field, clusters=clusters).rvs()
