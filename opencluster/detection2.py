@@ -25,7 +25,7 @@ from astropy.stats import biweight_location, biweight_scale, mad_std
 from astropy.stats.sigma_clipping import sigma_clipped_stats
 from warnings import warn
 from abc import abstractmethod
-from opencluster.subset import *
+from opencluster.masker import *
 from opencluster.detection import find_clusters
 
 def get_default_mask(dim: int):
@@ -316,6 +316,6 @@ def test_detection():
     print(res.peaks[0])
     print('coso')
 
-test_detection()
+# test_detection()
 
     

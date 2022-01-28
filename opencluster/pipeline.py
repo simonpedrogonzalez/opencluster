@@ -2,12 +2,11 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname('opencluster'), '.'))
 
-from opencluster.fetcher import load_file
 from opencluster.synthetic import *
 from opencluster.detection import *
 from opencluster.membership import *
 from opencluster.hkde import *
-from opencluster.subset import *
+from opencluster.masker import *
 from opencluster.clustering_tendency import *
 import matplotlib.pyplot as plt
 import seaborn as sns
