@@ -1,17 +1,14 @@
 import copy
-import math
 import os
 import sys
-import time
 from abc import abstractmethod
-from typing import Callable, List, Optional, Tuple, Type, Union
+from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import scipy.integrate as integrate
 import seaborn as sns
-from attr import asdict, attrs
+from attr import attrs
 from KDEpy import NaiveKDE
 from KDEpy.bw_selection import (
     improved_sheather_jones,
@@ -19,13 +16,11 @@ from KDEpy.bw_selection import (
     silvermans_rule,
 )
 from rpy2.robjects import r
-from rutils import *
-from scipy.stats import gaussian_kde, halfnorm, multivariate_normal, norm
-from sklearn.preprocessing import RobustScaler
+from rutils import pyargs2r, r2np, rclean, rhardload
+from scipy.stats import gaussian_kde, halfnorm, multivariate_normal
 from statsmodels.nonparametric.bandwidths import bw_scott, bw_silverman
 from statsmodels.nonparametric.kernel_density import KDEMultivariate
 from statsmodels.stats.correlation_tools import corr_nearest
-
 sys.path.append(
     os.path.join(
         os.path.dirname("opencluster"), "/home/simon/repos/opencluster"
@@ -35,12 +30,16 @@ from opencluster.synthetic import (
     Cluster,
     Field,
     Synthetic,
+    UniformSphere,
     one_cluster_sample,
+    polar_to_cartesian,
+    stats,
     three_clusters_sample,
 )
 
 # prepare r packages
 rhardload(r, ["ks"])
+
 
 # TODO: move to testing file
 def rkde(data):
@@ -53,12 +52,12 @@ def rkde(data):
     # from rpy2.robjects.vectors import StrVector
     # rpackages_names = StrVector(('ks', ... ))
     try:
-        ks = importr("ks")
-    except error:
+        importr("ks")
+    except Exception:
         utils = rpackages.importr("utils")
         utils.chooseCRANmirror(ind=1)
         utils.install_packages("ks")
-        ks = importr("ks")
+        importr("ks")
     obs, dims = data.shape
 
     r.assign("data", data)
@@ -107,13 +106,13 @@ class HKDE:
     def get_sigmas(self, data: np.ndarray, err: np.ndarray):
         obs, dims = data.shape
         # inherent distribution variance values
-        if isinstance(bw, Bandwidth):
+        if isinstance(self.bwbw, Bandwidth):
             self.bw.diag = True
             variance = np.diag(self.bw.H(data))
         elif isinstance(self.bw, (int, float)):
-            variance = np.ones(dims) * bw
-        elif isinstance(bw, (np.ndarray, list)):
-            bw = np.array(bw)
+            variance = np.ones(dims) * self.bw
+        elif isinstance(self.bw, (np.ndarray, list)):
+            bw = np.array(self.bw)
             if bw.shape != (dims,):
                 raise ValueError("Wrong shape in bw array")
             variance = bw
@@ -126,8 +125,8 @@ class HKDE:
             )
         else:
             # TODO: check
-            variance_with_err = np.sqrt(err ** 2 + variance ** 2)
-            sigmas = np.sqrt(variance_with_errors)
+            variance_with_err = err ** 2 + variance ** 2
+            sigmas = np.sqrt(variance_with_err)
             return sigmas
 
     def get_corr_coefs(self, data: np.ndarray, corr: Union[np.ndarray, str]):
@@ -154,6 +153,8 @@ class HKDE:
             elif (
                 corr == "auto"
             ):  # correlation is not given, calculate from data
+                # this may be theorically incorrect in the case
+                # of pm plx, but may be useful in other contexts
                 return (
                     np.repeat(
                         corr_nearest(np.corrcoef(data, rowvar=False)),
@@ -175,8 +176,10 @@ class HKDE:
                 )
             elif corr.shape == (obs, int(dims * (dims - 1) / 2)):
                 # correlation is given per observation per obs, per dims
-                # pairwise corr coef (no need for the 1s given by corr(samevar, samevar)) per observation
-                # example: for 1 obs and 4 vars, lower triangle of corr matrix looks like
+                # pairwise corr coef
+                # (no need for the 1s given by corr(samevar, samevar))
+                # per observation. Example: for 1 obs and 4 vars, lower triangle of corr
+                # matrix looks like:
                 # 12
                 # 13 23
                 # 14 24 34
@@ -306,11 +309,14 @@ class HKDE:
             raise ValueError("Eval points must have same dims as data.")
         print("eval")
         pdf = np.zeros(obs)
+
         # put weigths and normalization toghether in each step
         # pdf(point) = sum(ki(point)*wi/(sum(w)-wi))
+
         # TODO: include xi dispersion when getting sum(kj(xi))
         # should be sum((kj*ki)(xi)), that is, convolve ki with kj.
         # should be equivalent to aggregating Hi to Hj cuadratically
+
         norm_weigths = self.weights / (self.n - self.weights)
         if leave1out:
             for i, k in enumerate(self.kernels):
@@ -386,27 +392,6 @@ def test_bandwidth():
     print(s)
 
 
-def one_cluster_sample():
-    field = Field(
-        pm=stats.multivariate_normal(mean=(0.0, 0.0), cov=20),
-        space=UniformSphere(
-            center=polar_to_cartesian((120.5, -27.5, 5)), radius=10
-        ),
-        star_count=int(1e4),
-    )
-    clusters = [
-        Cluster(
-            space=stats.multivariate_normal(
-                mean=polar_to_cartesian([120.7, -28.5, 5]), cov=0.5
-            ),
-            pm=stats.multivariate_normal(mean=(0.5, 0), cov=1.0 / 35),
-            star_count=200,
-        ),
-    ]
-    df = Synthetic(field=field, clusters=clusters).rvs()
-    return df
-
-
 def test_hkde():
     field = Field(
         pm=stats.multivariate_normal(mean=(0.0, 0.0), cov=20),
@@ -430,9 +415,10 @@ def test_hkde():
 
     kdeh = HKDE().fit(s)
     Hkdeh = kdeh.covariances[0]
+    print(Hkdeh)
     kdeh_pdf = kdeh.pdf(s)
     bws = [scotts_rule(np.atleast_2d(s[:, i]).T) for i in range(dims)]
-
+    print(bws)
     # ss = RobustScaler().fit(s).transform(s)
     # with scipy i cannot set different bws for different dims
     # nor different bw per dim
@@ -444,7 +430,8 @@ def test_hkde():
     # default is 1
     kdepykde = NaiveKDE().fit(s)
     kdepy_pdf = kdepykde.evaluate(s)
-    # with statsmodels i can set different bws per dims, but not different bws per dim per obs
+    # with statsmodels i can set different bws per dims,
+    # but not different bws per dim per obs
     stmodkde = KDEMultivariate(s, "c" * dims, bw=[1] * dims)
     stmod_pdf = stmodkde.pdf(s)
 
@@ -517,7 +504,12 @@ def test_diff_bw_options():
     plt.figure()
     sns.histplot(pdf_unconstr, bins=50).set(title="dens ks")
     plt.show()
-    print("coso")
+    print("binned")
+    print(H_binned)
+    print("unconstr")
+    print(H_unconstr)
+    print("default")
+    print(H_default)
 
 
 def test_performance():
@@ -526,7 +518,7 @@ def test_performance():
     s = df.to_numpy()[:, 0:3]
     obs, dims = s.shape
     for i in range(10):
-        pdf = HKDE().fit(s).pdf(s)
+        HKDE().fit(s).pdf(s)
 
 
 def test_weigths():
@@ -540,6 +532,7 @@ def test_weigths():
     pdf3 = HKDE().set_weigths(np.ones(obs) * 0.5).fit(s).pdf(s)
     pdf4 = HKDE().set_weigths(np.ones(obs) * 0.5).fit(s).pdf(s, leave1out=True)
     assert np.allclose(pdf1, pdf3)
+    assert np.allclose(pdf1, pdf4)
     print("coso")
 
 
