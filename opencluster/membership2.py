@@ -1,7 +1,7 @@
 import os
 import sys
-from typing import Union
 from copy import deepcopy
+from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,9 +21,7 @@ from sklearn.preprocessing import RobustScaler
 sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
 
 from opencluster.hkde import HKDE, PluginBandwidth
-from opencluster.synthetic import (
-    one_cluster_sample_small,
-)
+from opencluster.synthetic import one_cluster_sample_small
 from opencluster.utils import combinations
 
 
@@ -54,35 +52,49 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
     iter_pdf_update: bool = False
 
     def calculate_likelihood(
-        self, data: np.ndarray, weights: np.ndarray,
+        self,
+        data: np.ndarray,
+        weights: np.ndarray,
     ):
-        
+
         densities = np.zeros((self.n_obs, self.n_classes))
-        
+
         if not len(self.class_estimators) or self.iter_pdf_update:
             # create pdf estimators for the first time or uptade them
             # (change kernels, covariances and weights)
             estimators = []
             for i in range(self.n_classes):
-                class_estimator = deepcopy(self.pdf_estimator).fit(data=data, weights=weights[:,i])
+                class_estimator = deepcopy(self.pdf_estimator).fit(
+                    data=data, weights=weights[:, i]
+                )
                 estimators.append(class_estimator)
                 densities[:, i] = class_estimator.pdf(data, leave1out=True)
             self.class_estimators = estimators
         else:
             # use same estimator (same kernel and covariances) but change weights
             for i in range(self.n_classes):
-                densities[:, i] = self.class_estimators[i].set_weights(weights[:,i]).pdf(data, leave1out=True)
-        
-        total_density = densities.sum(axis=1, keepdims=True).repeat(self.n_classes, axis=1)
+                densities[:, i] = (
+                    self.class_estimators[i]
+                    .set_weights(weights[:, i])
+                    .pdf(data, leave1out=True)
+                )
+
+        total_density = densities.sum(axis=1, keepdims=True).repeat(
+            self.n_classes, axis=1
+        )
         likelihood = densities / total_density
-        class_estimator.contour()
         return likelihood
 
     def calculate_posterior(self, data: np.ndarray, weights: np.ndarray):
         likelihoods = self.calculate_likelihood(data, weights)
-        weighted_likelihoods = likelihoods * np.repeat(self.class_priors[:, np.newaxis], self.n_obs, axis=1).T
+        weighted_likelihoods = (
+            likelihoods
+            * np.repeat(self.class_priors[:, np.newaxis], self.n_obs, axis=1).T
+        )
         obs_priors = weighted_likelihoods.sum(axis=1)
-        posterior = weighted_likelihoods / np.repeat(obs_priors[:,np.newaxis], self.n_classes, axis=1)
+        posterior = weighted_likelihoods / np.repeat(
+            obs_priors[:, np.newaxis], self.n_classes, axis=1
+        )
         return posterior, likelihoods
 
     def fit_predict(
@@ -115,17 +127,22 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
         clustering_result = self.clusterer.fit(distance_matrix)
         labels = clustering_result.labels_
 
-        self.class_labels, self.class_counts = np.unique(labels, return_counts=True)
+        self.class_labels, self.class_counts = np.unique(
+            labels, return_counts=True
+        )
         self.n_classes = len(self.class_labels)
         self.class_priors = self.class_counts / self.class_counts.sum()
 
         if self.n_classes == 1:
-            return np.atleast_2d(np.ones(obs)).T
+            return Membership(
+                p=np.atleast_2d(np.ones(self.n_obs)).T,
+                clustering_result=clustering_result,
+            )
 
-        weights = (self.class_labels == labels[:,None]).astype(np.int)
-        
+        weights = (self.class_labels == labels[:, None]).astype(np.int)
+
         posteriors, likelihoods = self.calculate_posterior(data, weights)
-        
+
         if self.n_iters < 2:
             return Membership(
                 clustering_result=clustering_result, p=posteriors
@@ -141,8 +158,10 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
             weights = previous_posteriors
             self.class_counts = likelihoods.sum(axis=0)
             self.class_priors = self.class_counts / self.class_counts.sum()
-            posteriors, likelihoods = self.calculate_posterior(data=data, weights=weights)
-            
+            posteriors, likelihoods = self.calculate_posterior(
+                data=data, weights=weights
+            )
+
             if np.allclose(
                 posteriors,
                 previous_posteriors,
@@ -152,9 +171,7 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
             # is copy actually needed?
             previous_posteriors = np.copy(posteriors)
 
-        return Membership(
-            clustering_result=clustering_result, p=posteriors
-        )
+        return Membership(clustering_result=clustering_result, p=posteriors)
 
 
 # TODO: remove
@@ -206,35 +223,28 @@ def test_membership():
     real_pmlabels = np.zeros_like(real_pmp)
     real_pmlabels[real_pmp > 0.5] = 1
 
-    calculated_pmp = (
-        DensityBasedMembershipEstimator(
-            min_cluster_size=50,
-            n_iters=100,
-            # pdf_estimator=HKDE(bw=PluginBandwidth(diag=True)),
-            iter_pdf_update=False,
-        ).fit_predict(data)
-        .p[:, 1]
+    estimator = DensityBasedMembershipEstimator(
+        min_cluster_size=50,
+        n_iters=2,
+        pdf_estimator=HKDE(bw=PluginBandwidth(diag=True)),
+        iter_pdf_update=False,
     )
+    result = estimator.fit_predict(data)
+    calculated_pmp = result.p[:, 1]
     calculated_labels = np.zeros_like(calculated_pmp)
     calculated_labels[calculated_pmp > 0.5] = 1
-    
-    calculated_pmp2 = (
-        DensityBasedMembershipEstimator(min_cluster_size=50, n_iters=1)
-        .fit_predict(data)
-        .p[:, 1]
-    )
-    calculated_labels2 = np.zeros_like(calculated_pmp2)
-    calculated_labels2[calculated_pmp2 > 0.5] = 1
-    
+
     acc = accuracy_score(real_pmlabels, calculated_labels)
     conf = confusion_matrix(real_pmlabels, calculated_labels)
     minfo = normalized_mutual_info_score(real_pmlabels, calculated_labels)
-    
+
     print("minfo")
     print(minfo)
     print("acc")
     print(acc)
     print("conf")
     print(conf)
+    print("end")
 
-test_membership()
+
+# test_membership()
