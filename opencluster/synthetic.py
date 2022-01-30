@@ -391,7 +391,7 @@ def one_cluster_sample(field_size=int(1e4)):
     df = Synthetic(field=field, clusters=clusters).rvs()
     return df
 
-def three_clusters_sample(field_size=int(1e4)):
+def three_clusters_sample(field_size=int(1e4), cluster_size=int(2e2)):
     field = Field(
     pm=stats.multivariate_normal(mean=(0., 0.), cov=20),
     space=UniformSphere(center=polar_to_cartesian((120.5, -27.5, 5)),
@@ -400,17 +400,17 @@ def three_clusters_sample(field_size=int(1e4)):
         Cluster(
             space=stats.multivariate_normal(mean=polar_to_cartesian([120.7, -28.5, 5]), cov=.5),
             pm=stats.multivariate_normal(mean=(.5, 0), cov=1./35),
-            star_count=200
+            star_count=cluster_size
         ),
         Cluster(
             space=stats.multivariate_normal(mean=polar_to_cartesian([120.8, -28.6, 5]), cov=.5),
             pm=stats.multivariate_normal(mean=(4.5, 4), cov=1./35),
-            star_count=200
+            star_count=cluster_size
         ),
         Cluster(
             space=stats.multivariate_normal(mean=polar_to_cartesian([120.9, -28.7, 5]), cov=.5),
             pm=stats.multivariate_normal(mean=(7.5, 7), cov=1./35),
-            star_count=200
+            star_count=cluster_size
         ),
     ]
     df = Synthetic(field=field, clusters=clusters).rvs()
