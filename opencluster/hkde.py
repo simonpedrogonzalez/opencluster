@@ -5,11 +5,9 @@ from abc import abstractmethod
 from typing import Union
 
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
 import pandas as pd
 import seaborn as sns
-import seaborn.distributions as snsd
 from attr import attrs
 from KDEpy import NaiveKDE
 from KDEpy.bw_selection import (
@@ -17,12 +15,14 @@ from KDEpy.bw_selection import (
     scotts_rule,
     silvermans_rule,
 )
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from rpy2.robjects import r
 from rutils import pyargs2r, r2np, rclean, rhardload
 from scipy.stats import gaussian_kde, halfnorm, multivariate_normal
 from statsmodels.nonparametric.bandwidths import bw_scott, bw_silverman
 from statsmodels.nonparametric.kernel_density import KDEMultivariate
 from statsmodels.stats.correlation_tools import corr_nearest
+
 sys.path.append(
     os.path.join(
         os.path.dirname("opencluster"), "/home/simon/repos/opencluster"
@@ -312,7 +312,7 @@ class HKDE:
             raise ValueError("Eval points must have same dims as data.")
         if obs < 1:
             raise ValueError("Eval points cannot be empty")
-        
+
         print("eval")
         if self.n_eff <= 0:
             return np.zeros(obs)
@@ -344,16 +344,24 @@ class HKDE:
             return pdf[0]
         return pdf
 
-    def density_plot(self, grid_resolution: int=50, figsize=(8,6), colnames=None, **kwargs):
+    def density_plot(
+        self,
+        grid_resolution: int = 50,
+        figsize=(8, 6),
+        colnames=None,
+        **kwargs,
+    ):
         self.check_fitted()
         # prepare data to plot
-        n=grid_resolution
+        n = grid_resolution
         linspaces = tuple(np.linspace(self.mins, self.maxs, num=n).T)
         grid = np.meshgrid(*linspaces)
         data = np.vstack(tuple(map(np.ravel, grid))).T
         density = self.pdf(eval_points=data)
         data_and_density = np.vstack((data.T, density))
-        grids = [axis.reshape(*tuple([n]*self.d)) for axis in data_and_density]
+        grids = [
+            axis.reshape(*tuple([n] * self.d)) for axis in data_and_density
+        ]
         density_grid = grids[-1]
         if colnames is None:
             colnames = [f"d{d+1}" for d in range(self.d)]
@@ -364,92 +372,108 @@ class HKDE:
             for j in range(self.d):
                 if i == j:
                     x = linspaces[i]
-                    axis_to_sum = tuple(set(list(np.arange(self.d)))-{i})
+                    axis_to_sum = tuple(set(list(np.arange(self.d))) - {i})
                     if len(axis_to_sum):
                         y = density_grid.sum(axis=axis_to_sum)
-                    univariate_density_plot(x=x, y=y, ax=axes[i,i])
+                    univariate_density_plot(x=x, y=y, ax=axes[i, i])
                 else:
                     x, y = np.meshgrid(linspaces[j], linspaces[i])
-                    axis_to_sum = tuple(set(list(np.arange(self.d)))-{i}-{j})
+                    axis_to_sum = tuple(
+                        set(list(np.arange(self.d))) - {i} - {j}
+                    )
                     if len(axis_to_sum):
                         z = density_grid.sum(axis=axis_to_sum)
                     else:
                         z = density_grid
                     _, im = bivariate_density_plot(
-                        x=x, y=y, z=z, colorbar=False,
-                        ax=axes[i,j], **kwargs)
+                        x=x, y=y, z=z, colorbar=False, ax=axes[i, j], **kwargs
+                    )
 
         for i in range(self.d):
             for j in range(self.d):
                 if i != j:
                     # share x axis with univariate density of same column
-                    axes[i,j].sharex(axes[j,j])
+                    axes[i, j].sharex(axes[j, j])
                     if j == 0 or (j == 1 and i == 0):
                         for k in range(self.d):
                             if k != j and k != i:
-                                axes[i,j].sharey(axes[i,k])
+                                axes[i, j].sharey(axes[i, k])
 
         fig.colorbar(im, ax=axes.ravel().tolist())
         return fig
 
+
 def bivariate_density_plot(
-    x, y, z,
+    x,
+    y,
+    z,
     levels: int = None,
-    contour_color: str="black",
-    cmap: str='inferno',
+    contour_color: str = "black",
+    cmap: str = "inferno",
     ax=None,
     figure=None,
     figsize=[8, 6],
-    subplot_pos: tuple=(1,1,1),
-    colorbar: bool=True,
-    title: str=None,
-    title_size: int=16,
-    grid: bool=True,
+    subplot_pos: tuple = (1, 1, 1),
+    colorbar: bool = True,
+    title: str = None,
+    title_size: int = 16,
+    grid: bool = True,
     **kwargs,
-    ):
+):
     if ax is None:
         if figure is None:
             figure = plt.figure(figsize=figsize)
-        ax = figure.add_subplot(1,1,1)
-    
+        ax = figure.add_subplot(1, 1, 1)
+
     if levels is not None:
         contour = ax.contour(x, y, z, levels, colors=contour_color)
         ax.clabel(contour, inline=True, fontsize=8)
-        alpha = .75
+        alpha = 0.75
     else:
         alpha = 1
-    im = ax.imshow(z, extent=[x.min(), x.max(), y.min(), y.max()], origin='lower', aspect="auto", cmap=cmap, alpha=alpha)
+    im = ax.imshow(
+        z,
+        extent=[x.min(), x.max(), y.min(), y.max()],
+        origin="lower",
+        aspect="auto",
+        cmap=cmap,
+        alpha=alpha,
+    )
     if colorbar:
         divider = make_axes_locatable(ax)
-        cax = divider.append_axes('right', size='5%', pad=0.1)
-        ax.get_figure().colorbar(im, cax=cax, orientation='vertical')
+        cax = divider.append_axes("right", size="5%", pad=0.1)
+        ax.get_figure().colorbar(im, cax=cax, orientation="vertical")
     if title is not None:
         ax.set_title(title, size=title_size)
     if grid:
-        ax.grid('on')
+        ax.grid("on")
     return ax, im
 
+
 def univariate_density_plot(
-    x, y,
-    color: str="blue",
-    marker: str=".",
+    x,
+    y,
+    color: str = "blue",
+    marker: str = ".",
     ax=None,
     figure=None,
     figsize=[8, 6],
-    title: str=None,
-    title_size: int=16,
-    grid: bool=True,
-    **kwargs):
+    title: str = None,
+    title_size: int = 16,
+    grid: bool = True,
+    **kwargs,
+):
     if ax is None:
         if figure is None:
             figure = plt.figure(figsize=figsize)
-        ax = figure.add_subplot(1,1,1)
+        ax = figure.add_subplot(1, 1, 1)
     ax.scatter(x, y, marker=marker, c=color, lw=1)
     zero = np.zeros(len(y))
-    ax.fill_between(x, y, where=y>=zero, interpolate=True, color=color)
+    ax.fill_between(x, y, where=y >= zero, interpolate=True, color=color)
     if grid:
-        ax.grid('on')
+        ax.grid("on")
     return ax
+
 
 def test_corr():
     obs = 3
@@ -653,12 +677,17 @@ def test_weights():
     assert np.allclose(pdf1, pdf4)
     print("coso")
 
+
 def test_kdeplot():
     np.random.seed(0)
-    data = one_cluster_sample_small()[['pmra', 'pmdec', 'log10_parallax']].to_numpy()
+    data = one_cluster_sample_small()[
+        ["pmra", "pmdec", "log10_parallax"]
+    ].to_numpy()
     hkde = HKDE().fit(data)
     hkde.density_plot(grid_resolution=100)
     print("coso")
+
+
 # test_performance()
 # test_weights()
 # test_kdeplot()
