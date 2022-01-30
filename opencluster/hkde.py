@@ -5,9 +5,11 @@ from abc import abstractmethod
 from typing import Union
 
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import seaborn.distributions as snsd
 from attr import attrs
 from KDEpy import NaiveKDE
 from KDEpy.bw_selection import (
@@ -32,6 +34,7 @@ from opencluster.synthetic import (
     Synthetic,
     UniformSphere,
     one_cluster_sample,
+    one_cluster_sample_small,
     polar_to_cartesian,
     stats,
     three_clusters_sample,
@@ -96,19 +99,23 @@ class PluginBandwidth(Bandwidth):
 @attrs(auto_attribs=True)
 class HKDE:
 
+    bw: Union[Bandwidth, int, float] = PluginBandwidth()
     kernels: np.ndarray = None
     covariances: np.ndarray = None
-    n: int = None
+    n: float = None
+    n_eff: float = None
     d: int = None
-    bw: Union[Bandwidth, int, float] = PluginBandwidth()
     weights: np.ndarray = None
+    eff_mask: np.ndarray = None
+    maxs: np.ndarray = None
+    mins: np.ndarray = None
 
     def get_sigmas(self, data: np.ndarray, err: np.ndarray):
         obs, dims = data.shape
         # inherent distribution variance values
-        if isinstance(self.bwbw, Bandwidth):
+        if isinstance(self.bw, Bandwidth):
             self.bw.diag = True
-            variance = np.diag(self.bw.H(data))
+            variance = np.diag(self.bw.H(data[self.eff_mask]))
         elif isinstance(self.bw, (int, float)):
             variance = np.ones(dims) * self.bw
         elif isinstance(self.bw, (np.ndarray, list)):
@@ -226,7 +233,7 @@ class HKDE:
         # checked
         if err is None and corr == "auto" and isinstance(self.bw, Bandwidth):
             # calculate full H from plugin method
-            cov = self.bw.H(data)
+            cov = self.bw.H(data[self.eff_mask])
             # repeat covariance for each obs
             return np.repeat(cov[:, np.newaxis], obs, 1).swapaxes(0, 1)
         # TODO: check
@@ -243,13 +250,17 @@ class HKDE:
             cov = cross_sigmas * corr_coefs
         return cov
 
-    def set_weigths(self, weights: np.ndarray):
+    def set_weights(self, weights: np.ndarray):
         if len(weights.shape) != 1:
             raise ValueError("Weights must be 1d np ndarray.")
         if np.any(weights > 1):
             raise ValueError("Weight values must belong to [0,1].")
+        if weights.shape[0] != self.n:
+            raise ValueError("Data must have same n as weights.")
         self.weights = weights
-        self.n = np.sum(self.weights)
+        self.n_eff = np.sum(self.weights)
+        # default atol used by numpy isclose is 1e-08
+        self.eff_mask = self.weights > 1e-08
         return self
 
     def fit(
@@ -261,25 +272,13 @@ class HKDE:
         *args,
         **kwargs,
     ):
-        obs, dims = data.shape
-        self.d = dims
+        self.n, self.d = data.shape
 
-        if weights is not None:
-            self.set_weigths(weights)
+        self.maxs = data.max(axis=0)
+        self.mins = data.min(axis=0)
 
-        if self.weights is not None:
-            if self.weights.shape[0] != obs:
-                raise ValueError("Data must have same n as weigths.")
-            data = data[self.weights > 0]
-            self.weights = self.weights[self.weights > 0]
-            obs, dims = data.shape
-        else:
-            self.set_weigths(np.ones(obs))
-
-        if obs == 0:
-            raise ValueError(
-                "Data matrix is empty or all points are weighted 0"
-            )
+        weights = weights if weights is not None else np.ones(self.n)
+        self.set_weights(weights)
 
         print("getting cov")
         self.covariances = self.get_cov_matrices(data, err, corr)
@@ -293,45 +292,164 @@ class HKDE:
                     *args,
                     **kwargs,
                 )
-                for i in range(obs)
+                for i in range(self.n)
             ]
         )
         print("done fit")
         return self
 
-    def pdf(self, eval_points: np.ndarray, leave1out=False):
-        if self.kernels is None:
+    def check_fitted(self):
+        if self.kernels is None or self.weights is None:
             raise Exception(
                 "Model not fitted. Try excecuting fit function first."
             )
+        return
+
+    def pdf(self, eval_points: np.ndarray, leave1out=False):
+        self.check_fitted()
         obs, dims = eval_points.shape
         if dims != self.d:
             raise ValueError("Eval points must have same dims as data.")
+        if obs < 1:
+            raise ValueError("Eval points cannot be empty")
+        
         print("eval")
-        pdf = np.zeros(obs)
+        if self.n_eff <= 0:
+            return np.zeros(obs)
 
-        # put weigths and normalization toghether in each step
+        pdf = np.zeros(obs)
+        kernels = self.kernels[self.eff_mask]
+        weights = self.weights[self.eff_mask]
+        n = self.n_eff
+
+        # put weights and normalization toghether in each step
         # pdf(point) = sum(ki(point)*wi/(sum(w)-wi))
 
         # TODO: include xi dispersion when getting sum(kj(xi))
         # should be sum((kj*ki)(xi)), that is, convolve ki with kj.
         # should be equivalent to aggregating Hi to Hj cuadratically
 
-        norm_weigths = self.weights / (self.n - self.weights)
+        norm_weights = weights / (n - weights)
         if leave1out:
-            for i, k in enumerate(self.kernels):
-                applied_k = k.pdf(eval_points) * norm_weigths[i]
+            for i, k in enumerate(kernels):
+                applied_k = k.pdf(eval_points) * norm_weights[i]
                 applied_k[i] = 0
                 pdf += applied_k
         else:
-            for i, k in enumerate(self.kernels):
-                applied_k = k.pdf(eval_points) * norm_weigths[i]
+            for i, k in enumerate(kernels):
+                applied_k = k.pdf(eval_points) * norm_weights[i]
                 pdf += applied_k
         if obs == 1:
             # return as float value
             return pdf[0]
         return pdf
 
+    def density_plot(self, grid_resolution: int=50, figsize=(8,6), colnames=None, **kwargs):
+        self.check_fitted()
+        # prepare data to plot
+        n=grid_resolution
+        linspaces = tuple(np.linspace(self.mins, self.maxs, num=n).T)
+        grid = np.meshgrid(*linspaces)
+        data = np.vstack(tuple(map(np.ravel, grid))).T
+        density = self.pdf(eval_points=data)
+        data_and_density = np.vstack((data.T, density))
+        grids = [axis.reshape(*tuple([n]*self.d)) for axis in data_and_density]
+        density_grid = grids[-1]
+        if colnames is None:
+            colnames = [f"d{d+1}" for d in range(self.d)]
+
+        fig, axes = plt.subplots(self.d, self.d, figsize=figsize)
+        # fig.subplots_adjust(hspace=.5, wspace=.001)
+        for i in range(self.d):
+            for j in range(self.d):
+                if i == j:
+                    x = linspaces[i]
+                    axis_to_sum = tuple(set(list(np.arange(self.d)))-{i})
+                    if len(axis_to_sum):
+                        y = density_grid.sum(axis=axis_to_sum)
+                    univariate_density_plot(x=x, y=y, ax=axes[i,i])
+                else:
+                    x, y = np.meshgrid(linspaces[j], linspaces[i])
+                    axis_to_sum = tuple(set(list(np.arange(self.d)))-{i}-{j})
+                    if len(axis_to_sum):
+                        z = density_grid.sum(axis=axis_to_sum)
+                    else:
+                        z = density_grid
+                    _, im = bivariate_density_plot(
+                        x=x, y=y, z=z, colorbar=False,
+                        ax=axes[i,j], **kwargs)
+
+        for i in range(self.d):
+            for j in range(self.d):
+                if i != j:
+                    # share x axis with univariate density of same column
+                    axes[i,j].sharex(axes[j,j])
+                    if j == 0 or (j == 1 and i == 0):
+                        for k in range(self.d):
+                            if k != j and k != i:
+                                axes[i,j].sharey(axes[i,k])
+
+        fig.colorbar(im, ax=axes.ravel().tolist())
+        return fig
+
+def bivariate_density_plot(
+    x, y, z,
+    levels: int = None,
+    contour_color: str="black",
+    cmap: str='inferno',
+    ax=None,
+    figure=None,
+    figsize=[8, 6],
+    subplot_pos: tuple=(1,1,1),
+    colorbar: bool=True,
+    title: str=None,
+    title_size: int=16,
+    grid: bool=True,
+    **kwargs,
+    ):
+    if ax is None:
+        if figure is None:
+            figure = plt.figure(figsize=figsize)
+        ax = figure.add_subplot(1,1,1)
+    
+    if levels is not None:
+        contour = ax.contour(x, y, z, levels, colors=contour_color)
+        ax.clabel(contour, inline=True, fontsize=8)
+        alpha = .75
+    else:
+        alpha = 1
+    im = ax.imshow(z, extent=[x.min(), x.max(), y.min(), y.max()], origin='lower', aspect="auto", cmap=cmap, alpha=alpha)
+    if colorbar:
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes('right', size='5%', pad=0.1)
+        ax.get_figure().colorbar(im, cax=cax, orientation='vertical')
+    if title is not None:
+        ax.set_title(title, size=title_size)
+    if grid:
+        ax.grid('on')
+    return ax, im
+
+def univariate_density_plot(
+    x, y,
+    color: str="blue",
+    marker: str=".",
+    ax=None,
+    figure=None,
+    figsize=[8, 6],
+    title: str=None,
+    title_size: int=16,
+    grid: bool=True,
+    **kwargs):
+    if ax is None:
+        if figure is None:
+            figure = plt.figure(figsize=figsize)
+        ax = figure.add_subplot(1,1,1)
+    ax.scatter(x, y, marker=marker, c=color, lw=1)
+    zero = np.zeros(len(y))
+    ax.fill_between(x, y, where=y>=zero, interpolate=True, color=color)
+    if grid:
+        ax.grid('on')
+    return ax
 
 def test_corr():
     obs = 3
@@ -521,7 +639,7 @@ def test_performance():
         HKDE().fit(s).pdf(s)
 
 
-def test_weigths():
+def test_weights():
     np.random.seed(0)
     df = three_clusters_sample(1000)
     s = df.to_numpy()[:, 0:3]
@@ -529,12 +647,18 @@ def test_weigths():
     pdf1 = HKDE().fit(s).pdf(s)
     # raises error
     # pdf2 = HKDE().fit(s, weights=np.zeros(obs)).pdf(s)
-    pdf3 = HKDE().set_weigths(np.ones(obs) * 0.5).fit(s).pdf(s)
-    pdf4 = HKDE().set_weigths(np.ones(obs) * 0.5).fit(s).pdf(s, leave1out=True)
+    pdf3 = HKDE().set_weights(np.ones(obs) * 0.5).fit(s).pdf(s)
+    pdf4 = HKDE().set_weights(np.ones(obs) * 0.5).fit(s).pdf(s, leave1out=True)
     assert np.allclose(pdf1, pdf3)
     assert np.allclose(pdf1, pdf4)
     print("coso")
 
-
+def test_kdeplot():
+    np.random.seed(0)
+    data = one_cluster_sample_small()[['pmra', 'pmdec', 'log10_parallax']].to_numpy()
+    hkde = HKDE().fit(data)
+    hkde.density_plot(grid_resolution=100)
+    print("coso")
 # test_performance()
-# test_weigths()
+# test_weights()
+# test_kdeplot()
