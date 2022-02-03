@@ -176,8 +176,7 @@ def test_PMPlxPipeline():
     data_to_plot = df[['pmra', 'pmdec', 'log10_parallax']].to_numpy()
 
     for n in range(n_clus):
-        pair(data_to_plot, p[:,n], (p[:,n]>.5).astype(np.int))
-        """ sns.scatterplot(df.ra, df.dec, hue=p[:, n], hue_norm=(0, 1)).set(
+        sns.scatterplot(df.ra, df.dec, hue=p[:, n], hue_norm=(0, 1)).set(
             title=f"p(x∈C{n}) ra-dec"
         )
         plt.figure()
@@ -187,10 +186,10 @@ def test_PMPlxPipeline():
         plt.figure()
         sns.scatterplot(
             df.pmra, df.parallax, hue=p[:, n], hue_norm=(0, 1)
-        ).set(title=f"p(x∈C{n}) pmra-plx") """
+        ).set(title=f"p(x∈C{n}) pmra-plx")
 
     plt.show()
     print("coso")
 
 
-test_PMPlxPipeline()
+# test_PMPlxPipeline()

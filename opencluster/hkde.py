@@ -23,11 +23,7 @@ from statsmodels.nonparametric.bandwidths import bw_scott, bw_silverman
 from statsmodels.nonparametric.kernel_density import KDEMultivariate
 from statsmodels.stats.correlation_tools import corr_nearest
 
-sys.path.append(
-    os.path.join(
-        os.path.dirname("opencluster"), "/home/simon/repos/opencluster"
-    )
-)
+sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
 from opencluster.synthetic import (
     Cluster,
     Field,
