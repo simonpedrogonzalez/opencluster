@@ -33,7 +33,7 @@ from statsmodels.nonparametric.kernel_density import KDEMultivariate
 from statsmodels.robust.scale import huber, hubers_scale
 from typing_extensions import TypedDict
 sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
-from opencluster.detection2 import CountPeakDetector
+from opencluster.detection2 import CountPeakDetector, DetectionResult
 from opencluster.hkde import HKDE
 from opencluster.masker import RangeMasker
 from opencluster.membership2 import DensityBasedMembershipEstimator, pair
@@ -46,6 +46,11 @@ class Pipeline:
     def process(self, df: pd.DataFrame, *args, **kwargs) -> np.ndarray:
         pass
 
+@attrs(auto_attribs=True)
+class PipelineResult:
+    p: np.ndarray
+    detection_result: DetectionResult
+    membership_estimators: list
 
 @attrs(auto_attribs=True)
 class PMPlxPipeline(Pipeline):
@@ -68,11 +73,11 @@ class PMPlxPipeline(Pipeline):
             min_sigma_dif=None,
             max_num_peaks=cluster_count
         )
-        res = detector.detect(data=detection_data)
+        detection_res = detector.detect(data=detection_data, heatmaps=True)
 
         sigma_multiplier = 1.5
 
-        membership_cols = ["pmra", "pmdec", "parallax"]
+        membership_cols = ["pmra", "pmdec", "log10_parallax"]
         n_vars = len(membership_cols)
         err_cols, missing_err = colnames.get_error_names(membership_cols)
         corr_cols, missing_corr = colnames.get_corr_names(membership_cols)
@@ -86,14 +91,15 @@ class PMPlxPipeline(Pipeline):
             membership_cols += corr_cols
             n_corrs = len(corr_cols)
         else:
-            corr = "auto"
+            corr = "zero"
 
         membership_cols += ["idx"]
 
         membership_data = df[membership_cols].to_numpy()
 
         global_p = []
-        for i, peak in enumerate(res.peaks):
+        membership_estimators=[]
+        for i, peak in enumerate(detection_res.peaks):
             limits = np.vstack(
                 (
                     peak.center - peak.sigma * sigma_multiplier,
@@ -137,15 +143,16 @@ class PMPlxPipeline(Pipeline):
 
             data = membership_subset[:, :n_vars]
             if not missing_err:
-                err = subset[:, n_vars : n_vars + n_errs]
+                err = data[:, n_vars : n_vars + n_errs]
             if not missing_corr:
-                corr = subset[:, n_vars + n_errs : n_vars + n_errs + n_corrs]
+                corr = data[:, n_vars + n_errs : n_vars + n_errs + n_corrs]
 
             mestimator = DensityBasedMembershipEstimator(
                 min_cluster_size=int(peak.count),
                 iter_pdf_update=True,
-                n_iters=5,
+                n_iters=3,
             )
+            membership_estimators.append(mestimator)
             mres = mestimator.fit_predict(data)
             p = mres.p
             region_obs, n_classes = p.shape
@@ -164,7 +171,12 @@ class PMPlxPipeline(Pipeline):
         result[:, 1:] = global_p
         result[:, 0] = 1 - global_p.sum(axis=1)
 
-        return result
+
+        return PipelineResult(
+            p=result,
+            detection_result=detection_res,
+            membership_estimators=membership_estimators
+        )
 
 
 def test_PMPlxPipeline():
@@ -193,3 +205,4 @@ def test_PMPlxPipeline():
 
 
 # test_PMPlxPipeline()
+

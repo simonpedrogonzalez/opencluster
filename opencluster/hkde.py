@@ -17,13 +17,14 @@ from KDEpy.bw_selection import (
 )
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from rpy2.robjects import r
-from rutils import pyargs2r, r2np, rclean, rhardload
 from scipy.stats import gaussian_kde, halfnorm, multivariate_normal
 from statsmodels.nonparametric.bandwidths import bw_scott, bw_silverman
 from statsmodels.nonparametric.kernel_density import KDEMultivariate
 from statsmodels.stats.correlation_tools import corr_nearest
 
 sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
+from opencluster.rutils import pyargs2r, r2np, rclean, rhardload
+
 from opencluster.synthetic import (
     Cluster,
     Field,

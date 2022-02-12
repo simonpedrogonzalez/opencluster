@@ -61,8 +61,8 @@ class Colnames2:
                 corr = corr1 if corr1 in correlations else corr2 if corr2 in correlations else ''
                 corr_matrix[i1, i2] = corr
         
-        sorted_correlations = list(corr_matrix[np.tril_indices(vc_count, k=-1)].astype(str))
-        missing_correlations = any(name == '' for name in sorted_correlations)
+        sorted_correlations = list(corr_matrix[np.tril_indices(len(names_with_corr), k=-1)].astype(str))
+        missing_correlations = len(names_with_corr) != len(names) or any(name == '' for name in sorted_correlations)
         return sorted_correlations, missing_correlations 
 
     def parse_to_list(self, names: Union[list, str]):
