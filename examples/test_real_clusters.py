@@ -26,7 +26,7 @@ test_clusters = [
     },
     { 
         'name': 'ngc2527',
-        'description': 'OK' ,
+        'description': 'OK. 1m stars' ,
         'filters': { 'parallax': '> 0.2'},
         'area_radius': 2.5,
     },
@@ -68,7 +68,7 @@ test_clusters = [
     }
 ]
 
-sample_number = 5
+sample_number = 1
 sample = test_clusters[sample_number]
 base_path = "/home/simon/repos/opencluster/scripts/data/clusters/"
 file_path = base_path + f"{sample.get('name')}.vot"
