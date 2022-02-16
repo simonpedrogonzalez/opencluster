@@ -8,22 +8,26 @@ import pytest
 class Ok:
     pass
 
-# TODO: unused
-class TestEDSD:
-    def test_EDSD_argv_check(self):
-        # needs more checks!!!
-        with pytest.raises(ValueError):
-            EDSD(wl=1.1, w0=4.1, wf=-.15).rvs(size=100)
-    
-    def test_EDSD_pdf_cdf(self):
-        # calculate pdf for 100 points, integrate
-        # calculate cdf, compare cdf with pdf integral
-        assert False
+def verify_result(test, func):
+    if issubclass(test, Exception):
+        with pytest.raises(test):
+            func()
+    else:
+        func()
 
-    def test_EDSD_cdf_ppf(self):
-        # calculate y = cdf(x0) for 100 points
-        # calculate x1 = ppf(y), compare x0 and x1 for minimal error
-        assert False
+class TestEDSD:
+    @pytest.mark.parametrize(
+        'w0, wl, wf, a, b, n, test', [
+            (1, 2, 3, None, None, 100, Ok),
+            ('a', 2, 3, None, None, 100, TypeError),
+            (1, 'a', 3, None, None, 100, TypeError),
+            (1, 2, 'a', None, None, 100, TypeError),
+            (1, 2, 3, 0, 5, 100, Ok),
+            (1.1, 4.1, -.15, None, None, 100, ValueError),
+            (1, 2, 3, 5, 3, 100, ValueError),
+            ])
+    def test_attrs(self, w0, wl, wf, a, b, n, test):
+        verify_result(test, lambda: EDSD(w0=w0, wl=wl, wf=wf, a=a, b=b).rvs(n))
 
     def test_EDSD_rvs(self):
         sample = EDSD(wl=1.1, w0=-.15, wf=4.1).rvs(size=100)
@@ -36,12 +40,12 @@ class TestEDSD:
         assert sample.max() <= min(3, 4.1)
 
 class TestHelpers:
+
     def test_coord_transform(self):
         cartesian = np.random.uniform(low=-16204., high=16204., size=(1000, 3))
         polar = cartesian_to_polar(cartesian)
         assert np.allclose(cartesian, polar_to_cartesian(polar))
 
-    # TODO: unused
     def test_uniform_circle(self):
         center = np.random.uniform(size=2)
         radius = np.random.uniform()
@@ -81,69 +85,58 @@ class TestHelpers:
 # TODO: update
 class TestField:
     @pytest.mark.parametrize(
-        'plx, space, pm, star_count, representation_type, test', [
-            (EDSD(1,2,3), UniformCircle(), multivariate_normal((0,0)), 1, 'cartesian', Ok),
-            (UniformCircle(), UniformCircle(), multivariate_normal((0,0)), 1, 'cartesian', TypeError),
-            (EDSD(1,2,3), multivariate_normal((0,0)), multivariate_normal((0,0)), 1, 'cartesian', Ok),
-            (EDSD(1,2,3), EDSD(1,2,3), multivariate_normal((0,0)), 1, 'cartesian', TypeError),
-            (EDSD(1,2,3), multivariate_normal(), multivariate_normal((0,0)), 1, 'cartesian', ValueError),
-            (EDSD(1,2,3), UniformCircle(), EDSD(1,2,3), 1, 'cartesian', TypeError),
-            (EDSD(1,2,3), UniformCircle(), multivariate_normal(), 1, 'cartesian', ValueError),
-            (EDSD(1,2,3), UniformCircle(), multivariate_normal((0,0)), 1., 'cartesian', TypeError),
-            (EDSD(1,2,3), UniformCircle(), multivariate_normal((0,0)), -1, 'cartesian', ValueError),
-            (EDSD(1,2,3), UniformCircle(), multivariate_normal((0,0)), 1, 'spherical', Ok),
-            (EDSD(1,2,3), UniformCircle(), multivariate_normal((0,0)), 1, 'other', ValueError),
+        'space, pm, n, rt, test', [
+            (UniformSphere(), multivariate_normal((0,0)), 1, 'cartesian', Ok),
+            (UniformCircle(), multivariate_normal((0,0)), 1, 'cartesian', ValueError),
+            ('something', multivariate_normal((0,0)), 1, 'cartesian', TypeError),
+            (multivariate_normal((0,0,0)), multivariate_normal((0,0)), 100, 'spherical', Ok),
+            (UniformSphere(), EDSD(1,2,3), 1, 'cartesian', TypeError),
+            (UniformSphere(), multivariate_normal(), 1, 'cartesian', ValueError),
+            (UniformSphere(), multivariate_normal((0,0)), 1., 'cartesian', TypeError),
+            (UniformSphere(), multivariate_normal((0,0)), -1, 'cartesian', ValueError),
+            (UniformSphere(), multivariate_normal((0,0)), 1, 'spherical', Ok),
+            (UniformSphere(), multivariate_normal((0,0)), 1, 'other', ValueError),
             ])
-    def test_attrs(self, plx, space, pm, star_count, representation_type, test):
-        if issubclass(test, Exception):
-            with pytest.raises(test):
-                Field(plx=plx, space=space, pm=pm, star_count=star_count, representation_type=representation_type)
-        else:
-            Field(plx=plx, space=space, pm=pm, star_count=star_count, representation_type=representation_type)
+    def test_attrs(self, space, pm, n, rt, test):
+        verify_result(test, lambda: Field(space=space, pm=pm, representation_type=rt, star_count=n).rvs())
     
     def test_rvs(self):
-        field_data = Field(
-            plx=EDSD(1,2,3),
-            space=UniformCircle(),
+        df = Field(
+            space=UniformSphere(),
             pm=multivariate_normal((0,0)),
             star_count=int(1e5),
             representation_type='spherical'
         ).rvs()
-        assert isinstance(field_data, pd.DataFrame)
-        assert field_data.shape == (int(1e5), 5)
-        assert sorted(list(field_data.columns)) == sorted(['ra', 'dec', 'parallax', 'pmra', 'pmdec'])
-        field_data = Field(
-            plx=EDSD(1,2,3),
-            space=UniformCircle(),
+        assert isinstance(df, pd.DataFrame)
+        assert df.shape == (int(1e5), 5)
+        assert sorted(list(df.columns)) == sorted(['ra', 'dec', 'parallax', 'pmra', 'pmdec'])
+        df = Field(
+            space=UniformSphere(),
             pm=multivariate_normal((0,0)),
             star_count=int(1e5),
             representation_type='cartesian'
         ).rvs()
-        assert isinstance(field_data, pd.DataFrame)
-        assert field_data.shape == (int(1e5), 5)
-        assert sorted(list(field_data.columns)) == sorted(['x', 'y', 'z', 'pmra', 'pmdec'])
+        assert isinstance(df, pd.DataFrame)
+        assert df.shape == (int(1e5), 5)
+        assert sorted(list(df.columns)) == sorted(['x', 'y', 'z', 'pmra', 'pmdec'])
 
 # TODO: update
 class TestCluster:
     @pytest.mark.parametrize(
-        'space, pm, star_count, representation_type, test',
-        [
-           (multivariate_normal((0,0,0)), multivariate_normal((0,0)), 1, 'cartesian', Ok),
-            (EDSD(1,2,3), multivariate_normal((0,0)), 1, 'cartesian', TypeError),
-            (UniformCircle(), multivariate_normal((0,0)), 1, 'cartesian', ValueError),
-            (multivariate_normal((0,0,0)), EDSD(1,2,3), 1, 'cartesian', TypeError),
-            (multivariate_normal((0,0,0)), multivariate_normal(), 1, 'cartesian', ValueError),
-            (multivariate_normal((0,0,0)), multivariate_normal((0,0)), .1, 'cartesian', TypeError),
-            (multivariate_normal((0,0,0)), multivariate_normal((0,0)), -1, 'cartesian', ValueError),
-            (multivariate_normal((0,0,0)), multivariate_normal((0,0)), 1, 'other', ValueError),
-            (multivariate_normal((0,0,0)), multivariate_normal((0,0)), 1, 'spherical', Ok),
+    'space, pm, n, rt, test', [
+        (UniformSphere(), multivariate_normal((0,0)), 1, 'cartesian', Ok),
+        (UniformCircle(), multivariate_normal((0,0)), 1, 'cartesian', ValueError),
+        ('something', multivariate_normal((0,0)), 1, 'cartesian', TypeError),
+        (multivariate_normal((0,0,0)), multivariate_normal((0,0)), 100, 'spherical', Ok),
+        (UniformSphere(), EDSD(1,2,3), 1, 'cartesian', TypeError),
+        (UniformSphere(), multivariate_normal(), 1, 'cartesian', ValueError),
+        (UniformSphere(), multivariate_normal((0,0)), 1., 'cartesian', TypeError),
+        (UniformSphere(), multivariate_normal((0,0)), -1, 'cartesian', ValueError),
+        (UniformSphere(), multivariate_normal((0,0)), 1, 'spherical', Ok),
+        (UniformSphere(), multivariate_normal((0,0)), 1, 'other', ValueError),
         ])
-    def test_attrs(self, space, pm, star_count, representation_type, test):
-        if issubclass(test, Exception):
-            with pytest.raises(test):
-                Cluster(space=space, pm=pm, star_count=star_count, representation_type=representation_type)
-        else:
-            Cluster(space=space, pm=pm, star_count=star_count, representation_type=representation_type)
+    def test_attrs(self, space, pm, n, rt, test):
+        verify_result(test, lambda: Cluster(space=space, pm=pm, representation_type=rt, star_count=n).rvs())
 
     def test_rvs(self):
         cluster_data = Cluster(
@@ -167,8 +160,55 @@ class TestCluster:
 
 # TODO
 class TestSynthetic:
-    def test_attrs(self):
-        assert False
+    @pytest.mark.parametrize(
+    'field, clusters, rt, test', [
+        (Field(space=UniformSphere(), pm=multivariate_normal((0,0)), star_count=10), [Cluster(space=UniformSphere(), pm=multivariate_normal((0,0)), star_count=10)], 'cartesian', Ok),
+        (Field(space=UniformSphere(), pm=multivariate_normal((0,0)), star_count=10), [Cluster(space=UniformSphere(), pm=multivariate_normal((0,0)), star_count=10)], 'spherical', Ok),
+        ('something', [Cluster(space=UniformSphere(), pm=multivariate_normal((0,0)), star_count=10)], 'cartesian', TypeError),
+        (Field(space=UniformSphere(), pm=multivariate_normal((0,0)), star_count=10), Cluster(space=UniformSphere(), pm=multivariate_normal((0,0)), star_count=10), 'cartesian', TypeError),
+        (Field(space=UniformSphere(), pm=multivariate_normal((0,0)), star_count=10), [Cluster(space=UniformSphere(), pm=multivariate_normal((0,0)), star_count=10)], 'other', ValueError),
+        ])
+    def test_attrs(self, field, clusters, rt, test):
+        verify_result(test, lambda: Synthetic(field=field, clusters=clusters, representation_type=rt).rvs())
 
     def test_rvs(self):
-        assert False
+        s = Synthetic(
+            clusters=[
+                Cluster(
+                    space=multivariate_normal((0,0,0)),
+                    pm=multivariate_normal((0,0)),
+                    star_count=100,
+                ),
+                Cluster(
+                    space=multivariate_normal((.5,.5,.5)),
+                    pm=multivariate_normal((.5,.5)),
+                    star_count=50,
+                ),
+            ],
+            field=Field(
+                space=UniformSphere(radius=10),
+                pm=multivariate_normal((0,0)),
+                star_count=int(1e5),
+            )
+        )
+        s.representation_type = 'cartesian'
+        df = s.rvs()
+        assert isinstance(df, pd.DataFrame)
+        assert df.shape == (int(1e5)+100+50, 14)
+        assert sorted(list(df.columns)) == sorted([
+            'x', 'y', 'z', 'pmra', 'pmdec',
+            'p_cluster1', 'p_cluster2', 'p_field',
+            'p_pm_cluster1', 'p_pm_cluster2', 'p_pm_field',
+            'p_space_cluster1', 'p_space_cluster2', 'p_space_field',
+            ])
+        
+        s.representation_type = 'spherical'
+        df = s.rvs()
+        assert isinstance(df, pd.DataFrame)
+        assert df.shape == (int(1e5)+100+50, 15)
+        assert sorted(list(df.columns)) == sorted([
+            'ra', 'dec', 'parallax', 'log10_parallax', 'pmra', 'pmdec',
+            'p_cluster1', 'p_cluster2', 'p_field',
+            'p_pm_cluster1', 'p_pm_cluster2', 'p_pm_field',
+            'p_space_cluster1', 'p_space_cluster2', 'p_space_field',
+            ])

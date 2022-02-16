@@ -31,8 +31,7 @@ def is_inside_sphere(center, radius, data):
     return dx**2 + dy**2 + dz**2 <= radius**2
 
 # Coordinate transformation
-# TODO: change to take three arrays or numbers as input
-def cartesian_to_polar(coords):
+def cartesian_to_polar(coords: Union[np.ndarray, list]):
     coords = np.array(coords)
     if len(coords.shape) == 1:
         coords = SkyCoord(
@@ -49,8 +48,7 @@ def cartesian_to_polar(coords):
         coords.representation_type = 'spherical'
         return np.vstack((coords.ra.deg, coords.dec.deg, coords.distance.parallax.mas)).T
 
-# TODO: change to take three arrays or numbers as input
-def polar_to_cartesian(coords):
+def polar_to_cartesian(coords: Union[np.ndarray, list]):
     coords = np.array(coords)
     if len(coords.shape) == 1:
         coords = SkyCoord(
@@ -93,6 +91,8 @@ def has_len(length: int):
     return has_len_validator
 
 # Custom distributions
+
+# unused
 @attrs(auto_attribs=True, init=False)
 class EDSD(stats.rv_continuous):
     
@@ -235,12 +235,12 @@ class Cluster:
     def rvs(self):
         size = self.star_count
         data = pd.DataFrame()
-        xyz = self.space.rvs(size)
+        xyz = np.atleast_2d(self.space.rvs(size))
         if self.representation_type == 'spherical':
             data['ra'], data['dec'], data['parallax'] = cartesian_to_polar(xyz).T
         else:
             data[['x', 'y', 'z']] = pd.DataFrame(xyz)
-        pm = self.pm.rvs(size)
+        pm = np.atleast_2d(self.pm.rvs(size))
         data[['pmra', 'pmdec']] = pd.DataFrame(pm)
         return data
 
@@ -282,8 +282,8 @@ class Field:
     def rvs(self):
         size = self.star_count
         data = pd.DataFrame()
-        xyz = self.space.rvs(size)
-        pm = self.pm.rvs(size)
+        xyz = np.atleast_2d(self.space.rvs(size))
+        pm = np.atleast_2d(self.pm.rvs(size))
         data[['pmra', 'pmdec']] = pd.DataFrame(
                 np.vstack((pm[:, 0], pm[:, 1])).T)
         if self.representation_type == 'spherical':
@@ -374,6 +374,7 @@ class Synthetic:
             xyz = data[['x', 'y', 'z']].to_numpy()
             data['ra'], data['dec'], data['parallax'] = cartesian_to_polar(xyz).T
             data['log10_parallax'] = np.log10(data['parallax'])
+            data.drop(['x', 'y', 'z'], inplace=True, axis=1)
         return data
 
 def one_cluster_sample(field_size=int(1e4)):
