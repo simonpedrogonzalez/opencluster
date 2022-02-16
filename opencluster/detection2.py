@@ -292,8 +292,12 @@ class CountPeakDetector(PeakDetector):
             smoothed = convolve(hist, mask=mask)
             sharp = hist - smoothed
             std = fast_std_filter(hist, mask=mask)
+            # err_hist = sqrt(hist)
+            # err_smoothed = std(smoothed)
+            # err_sharp = err_hist^2 + err_smoothed^2
+            # normalized = sharp / err_sharp
             # +1 is added to avoid zero division
-            normalized = sharp / (std + 1)
+            normalized = sharp / np.sqrt(hist + std**2 + 1)
 
             if self.min_dif is not None:
                 # check for other way to implement
@@ -436,7 +440,7 @@ def test_detection():
 
     res = CountPeakDetector(
         bin_shape=[0.5, 0.5, 0.05], max_num_peaks=3
-    ).detect(data)
+    ).detect(data, heatmaps=True)
     res2 = find_clusters(data, [0.5, 0.5, 0.05], max_num_peaks=3)
     print(res2)
     print(res.peaks[0])

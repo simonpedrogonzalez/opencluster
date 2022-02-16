@@ -36,7 +36,7 @@ sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
 from opencluster.detection2 import CountPeakDetector, DetectionResult
 from opencluster.hkde import HKDE
 from opencluster.masker import RangeMasker
-from opencluster.membership2 import DensityBasedMembershipEstimator, pair
+from opencluster.membership2 import DensityBasedMembershipEstimator
 from opencluster.synthetic import three_clusters_sample
 from opencluster.utils import Colnames2
 
@@ -77,7 +77,7 @@ class PMPlxPipeline(Pipeline):
 
         sigma_multiplier = 1.5
 
-        membership_cols = ["pmra", "pmdec", "log10_parallax"]
+        membership_cols = ["pmra", "pmdec", "parallax"]
         n_vars = len(membership_cols)
         err_cols, missing_err = colnames.get_error_names(membership_cols)
         corr_cols, missing_corr = colnames.get_corr_names(membership_cols)
@@ -141,6 +141,7 @@ class PMPlxPipeline(Pipeline):
 
             # membership_subset = membership_data[membership_mask]
 
+            # TODO: check
             data = membership_subset[:, :n_vars]
             if not missing_err:
                 err = data[:, n_vars : n_vars + n_errs]
@@ -150,7 +151,7 @@ class PMPlxPipeline(Pipeline):
             mestimator = DensityBasedMembershipEstimator(
                 min_cluster_size=int(peak.count),
                 iter_pdf_update=True,
-                n_iters=3,
+                n_iters=30,
             )
             membership_estimators.append(mestimator)
             mres = mestimator.fit_predict(data)

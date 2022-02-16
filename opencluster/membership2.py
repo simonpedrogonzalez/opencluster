@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Union
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -23,12 +24,16 @@ sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
 from opencluster.hkde import HKDE, PluginBandwidth
 from opencluster.synthetic import one_cluster_sample_small
 from opencluster.utils import combinations
+from opencluster.fetcher import load_file
+from opencluster.masker import RangeMasker
 
 
 @attrs(auto_attribs=True)
 class Membership:
     p: np.ndarray
+    labels: np.ndarray
     clustering_result: HDBSCAN
+
 
 
 @attrs(auto_attribs=True)
@@ -43,15 +48,22 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
     pdf_estimator: HKDE = HKDE()
     allow_single_cluster: bool = True
     min_samples: int = None
-    class_estimators: list = []
-    n_classes: int = None
-    class_labels: np.ndarray = None
-    class_priors: np.ndarray = None
-    class_counts: np.ndarray = None
-    n_obs: float = None
     iter_pdf_update: bool = False
+    
+    # internal attrs
+    estimators: list = []
 
-    def calculate_likelihood(
+    n_classes: int = None
+    n_obs: float = None
+
+    labels: np.ndarray = None
+    priors: np.ndarray = None
+    class_counts: np.ndarray = None
+
+    posteriors: np.ndarray = None
+    data: np.ndarray = None
+
+    """ def calculate_likelihood(
         self,
         data: np.ndarray,
         weights: np.ndarray,
@@ -59,7 +71,7 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
 
         densities = np.zeros((self.n_obs, self.n_classes))
 
-        if not len(self.class_estimators) or self.iter_pdf_update:
+        if not len(self.estimators) or self.iter_pdf_update:
             # create pdf estimators for the first time or uptade them
             # (change kernels, covariances and weights)
             estimators = []
@@ -69,42 +81,70 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
                 )
                 estimators.append(class_estimator)
                 densities[:, i] = class_estimator.pdf(data, leave1out=True)
-            self.class_estimators = estimators
+            self.estimators = estimators
         else:
             # use same estimator (same kernel and covariances) but change weights
             for i in range(self.n_classes):
                 densities[:, i] = (
-                    self.class_estimators[i]
+                    self.estimators[i]
                     .set_weights(weights[:, i])
                     .pdf(data, leave1out=True)
                 )
 
-        total_density = densities.sum(axis=1, keepdims=True).repeat(
-            self.n_classes, axis=1
-        )
+        total_density = (densities * self.class_priors).sum(axis=1, keepdims=True).repeat(self.n_classes, axis=1)
         likelihood = densities / total_density
-        return likelihood
+        return likelihood """
 
-    def calculate_posterior(self, data: np.ndarray, weights: np.ndarray):
+    """     def calculate_posterior(self, data: np.ndarray, weights: np.ndarray):
         likelihoods = self.calculate_likelihood(data, weights)
-        weighted_likelihoods = (
-            likelihoods
-            * np.repeat(self.class_priors[:, np.newaxis], self.n_obs, axis=1).T
-        )
+        weighted_likelihoods = likelihoods * self.class_priors
         obs_priors = weighted_likelihoods.sum(axis=1)
         posterior = weighted_likelihoods / np.repeat(
             obs_priors[:, np.newaxis], self.n_classes, axis=1
         )
-        return posterior, likelihoods
+        return posterior, likelihoods """
+
+    def calculate_posterior2(self, data: np.ndarray, err, corr, weights: np.ndarray):
+        densities = np.zeros((self.n_obs, self.n_classes))
+
+        if not len(self.estimators) or self.iter_pdf_update:
+            # create pdf estimators for the first time or uptade them
+            # (change kernels, covariances and weights)
+            estimators = []
+            for i in range(self.n_classes):
+                class_estimator = deepcopy(self.pdf_estimator).fit(
+                    data=data, err=err, corr=corr, weights=weights[:, i],
+                )
+                estimators.append(class_estimator)
+                densities[:, i] = class_estimator.pdf(data, leave1out=True)
+            self.estimators = estimators
+        else:
+            # use same estimator (same kernel and covariances) but change weights
+            for i in range(self.n_classes):
+                densities[:, i] = (
+                    self.estimators[i]
+                    .set_weights(weights[:, i])
+                    .pdf(data, leave1out=True)
+                )
+
+        total_density = (densities * self.class_counts).sum(axis=1, keepdims=True).repeat(self.n_classes, axis=1)
+        posteriors = densities*self.class_counts / total_density
+        return posteriors
+
+    def get_labels(self, posteriors):
+        labels = np.argmax(posteriors, axis=1)-1
+        return labels
 
     def fit_predict(
         self,
         data: np.ndarray,
         err: np.ndarray = None,
-        corr: Union[np.ndarray, str] = "auto",
+        corr: Union[np.ndarray, str] = "zero",
     ):
 
         self.n_obs, dims = data.shape
+        self.data = data
+
         if self.clustering_scaler is not None:
             clustering_data = self.clustering_scaler.fit(data).transform(data)
         else:
@@ -127,40 +167,50 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
         clustering_result = self.clusterer.fit(distance_matrix)
         labels = clustering_result.labels_
 
-        self.class_labels, self.class_counts = np.unique(
+        self.labels, self.class_counts = np.unique(
             labels, return_counts=True
         )
-        self.n_classes = len(self.class_labels)
-        self.class_priors = self.class_counts / self.class_counts.sum()
+        self.n_classes = len(self.labels)
+        self.priors = self.class_counts / self.class_counts.sum()
 
         if self.n_classes == 1:
+            self.posteriors = np.atleast_2d(np.ones(self.n_obs)).T
+            self.labels = self.get_labels(self.posteriors)
             return Membership(
-                p=np.atleast_2d(np.ones(self.n_obs)).T,
+                p=self.posteriors,
                 clustering_result=clustering_result,
+                labels=self.labels
             )
 
-        weights = (self.class_labels == labels[:, None]).astype(np.int)
+        weights = (self.labels == labels[:, None]).astype(np.int)
 
-        posteriors, likelihoods = self.calculate_posterior(data, weights)
+        posteriors = self.calculate_posterior2(data, err=err, corr=corr, weights=weights)
+        self.posteriors = posteriors
+        self.labels = self.get_labels(posteriors)
 
         if self.n_iters < 2:
+            self.posteriors = posteriors
+            self.labels = self.get_labels(self.posteriors)
             return Membership(
-                clustering_result=clustering_result, p=posteriors
+                clustering_result=clustering_result, p=posteriors, labels=self.labels
             )
 
         previous_posteriors = posteriors
 
         for i in range(self.n_iters):
-            print(self.class_priors)
-            print(self.class_counts)
-            print([e.covariances[0] for e in self.class_estimators])
+            # self.membership_plot(0)
+            # plt.show()
+            # print([e.covariances[0] for e in self.estimators])
             # update priors
+            print(self.priors)
+            print(self.posteriors.sum(axis=0))
             weights = previous_posteriors
-            self.class_counts = likelihoods.sum(axis=0)
-            self.class_priors = self.class_counts / self.class_counts.sum()
-            posteriors, likelihoods = self.calculate_posterior(
-                data=data, weights=weights
+            self.class_counts = posteriors.sum(axis=0)
+            self.priors = self.class_counts / self.class_counts.sum()
+            posteriors = self.calculate_posterior2(
+                data=data, weights=weights, err=err, corr=corr,
             )
+            self.posteriors = posteriors
 
             if np.allclose(
                 posteriors,
@@ -171,48 +221,47 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
             # is copy actually needed?
             previous_posteriors = np.copy(posteriors)
 
-        return Membership(clustering_result=clustering_result, p=posteriors)
+        self.posteriors = posteriors
+        self.labels = self.get_labels(self.posteriors)
+        return Membership(clustering_result=clustering_result, p=posteriors, labels=self.labels)
+
+    def membership_plot(self, label=-1, **kwargs):
+        return membership_plot(self.data, self.posteriors[:,label+1], self.labels, **kwargs)
 
 
-# TODO: remove
-def pair(data, mem=None, labels=None):
-    df = pd.DataFrame(data)
-    if data.shape[1] == 2:
-        df.columns = ["pmra", "pmdec"]
-    elif data.shape[1] == 3:
-        df.columns = ["pmra", "pmdec", "parallax"]
-    elif data.shape[1] == 5:
-        df.columns = ["pmra", "pmdec", "parallax", "ra", "dec"]
-    else:
-        raise Exception("wrong col number")
-    if mem is None and labels is None:
-        return sns.pairplot(df)
-    if mem is not None:
-        hue = np.round(mem, 2)
-    else:
-        hue = labels
-    return sns.pairplot(
-        df,
-        plot_kws={"hue": hue, "hue_norm": (0, 1)},
+def membership_plot(
+    data:Union[np.ndarray, pd.DataFrame],
+    posteriors,
+    labels,
+    colnames:list=None,
+    palette='flare',
+    corner=False,
+    marker='o',
+    ):
+
+    if isinstance(data, np.ndarray):
+        obs, dims = data.shape
+        data = pd.DataFrame(data)
+        if colnames is not None:
+            data.columns = colnames
+        else:
+            data.columns = [f"var {i+1}" for i in range(dims)]
+    
+    # norm = plt.Normalize(0, 1)
+    cmap = ListedColormap(sns.color_palette(palette).as_hex())
+    sm = plt.cm.ScalarMappable(cmap=sns.color_palette(palette, as_cmap=True))#, norm=norm)
+    sm.set_array([])
+    
+    ax = sns.pairplot(
+        data,
+        plot_kws={"hue": posteriors, "hue_norm": (0, 1), "marker": marker},
         diag_kind="kde",
         diag_kws={"hue": labels},
-        corner=True,
-    ).map_lower(sns.kdeplot, levels=4, color=".1")
-
-
-# TODO: remove
-def grid(data, resolution: list = None):
-    obs, dims = data.shape
-    dim_points = []
-    if resolution is None:
-        resolution = [50] * dims
-    for i in range(dims):
-        dim_points.append(
-            np.linspace(data[:, i].min(), data[:, i].max(), num=resolution[i])
-        )
-    c = combinations(dim_points)
-    return np.array(c)
-
+        palette=palette,
+        corner=corner,
+    )
+    plt.colorbar(sm, ax=ax.axes)
+    return ax
 
 def test_membership():
     np.random.seed(0)
@@ -225,7 +274,7 @@ def test_membership():
 
     estimator = DensityBasedMembershipEstimator(
         min_cluster_size=50,
-        n_iters=2,
+        n_iters=30,
         pdf_estimator=HKDE(bw=PluginBandwidth(diag=True)),
         iter_pdf_update=False,
     )
@@ -247,4 +296,36 @@ def test_membership():
     print("end")
 
 
-# test_membership()
+def test_membership_real():
+    file = 'scripts/data/clusters/ngc2527.vot'
+    data = load_file(file).to_pandas()
+    data_to_filter = data[['pmra', 'pmdec', 'log10_parallax']].to_numpy()
+    data_membership = data[['pmra', 'pmdec', 'pmra_error', 'pmdec_error', 'pmra_pmdec_corr']].to_numpy()
+
+    limits = np.array([
+        [-6.31562475, -4.81562475],
+        [ 6.58107034,  8.08107034],
+        [ 0.11824112,  0.26824112]])
+
+    mask = RangeMasker(limits).mask(data_to_filter)
+    data_membership = data_membership[mask]
+    data=data_membership[:,:2]
+    err=data_membership[:,2:4]
+    corr = np.atleast_2d(data_membership[:,4]).T
+
+    estimator = DensityBasedMembershipEstimator(
+        min_cluster_size=213,
+        n_iters=200,
+        pdf_estimator=HKDE(bw=PluginBandwidth(diag=True)),
+        iter_pdf_update=False,
+        allow_single_cluster=True,
+    )
+    result = estimator.fit_predict(data=data, err=err, corr=corr)
+
+    p = result.p
+
+    sns.scatterplot(data[:,0], data[:,1], hue=p[:,1])
+    print('coso')
+
+#test_membership()
+# test_membership_real()

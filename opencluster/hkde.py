@@ -399,7 +399,6 @@ class HKDE:
         fig.colorbar(im, ax=axes.ravel().tolist())
         return fig
 
-
 def bivariate_density_plot(
     x,
     y,
