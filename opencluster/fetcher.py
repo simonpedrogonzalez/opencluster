@@ -27,25 +27,34 @@
 import inspect
 import io
 import warnings
+from numbers import Number
+from typing import List, Tuple, TypeVar, Union
 
 import astropy.units as u
+import numpy as np
+import pandas as pd
 from astropy.coordinates import SkyCoord
 from astropy.io.votable import from_table, parse, writeto
 from astropy.table.table import Table
-
-from astroquery.gaia import Gaia
+from astropy.units.quantity import Quantity
 from astroquery.simbad import Simbad
 from astroquery.utils.commons import coord_to_radec, radius_to_unit
-
 from attr import attrib, attrs, validators
+from beartype import beartype
+from typing_extensions import Annotated
 
-import numpy as np
-
-
-def default_table():
-    return "gaiaedr3.gaia_source"
+Coord = Tuple[Number, Number]
 
 
+@attrs(auto_attribs=True)
+class Conf:
+    MAIN_GAIA_TABLE: str = "gaiaedr3.gaia_source"
+    MAIN_GAIA_TABLE_RA: str = "ra"
+    MAIN_GAIA_TABLE_DEC: str = "dec"
+    ROW_LIMIT: int = -1
+
+
+# DEPRECATED
 def checkargs(function):
     """Check arguments match their annotated type.
 
@@ -82,10 +91,16 @@ def checkargs(function):
     return wrapper
 
 
-@checkargs
+@attrs(auto_attribs=True)
+class SimbadResult:
+    coords: SkyCoord = None
+    table: Table = None
+
+
+@beartype
 def simbad_search(
     identifier: str,
-    fields=[
+    cols: List[str] = [
         "coordinates",
         "parallax",
         "propermotions",
@@ -93,8 +108,6 @@ def simbad_search(
         "dimensions",
         "diameter",
     ],
-    dump_to_file: bool = False,
-    output_file: str = None,
     **kwargs,
 ):
     """Search an identifier in Simbad catalogues.
@@ -122,25 +135,20 @@ def simbad_search(
         If the identifier has not been found in Simbad Catalogues.
     """
     simbad = Simbad()
-    for f in fields:
-        simbad.add_votable_fields(f)
-    result = simbad.query_object(identifier, **kwargs)
+    simbad.add_votable_fields(*cols)
+    table = simbad.query_object(identifier, **kwargs)
 
-    if result is None:
-        warnings.warn("Identifier not found.")
-        return None
+    if table is None:
+        return SimbadResult()
 
-    coord = " ".join(
-        np.array(simbad.query_object(identifier)[["RA", "DEC"]])[0]
+    try:
+        coord = " ".join(np.array(table[["RA", "DEC"]])[0])
+    except:
+        coord = None
+
+    return SimbadResult(
+        coords=SkyCoord(coord, unit=(u.hourangle, u.deg)), table=table
     )
-
-    if dump_to_file:
-        if not output_file:
-            output_file = identifier
-        table = from_table(result)
-        writeto(table=table, file=output_file)
-
-    return SkyCoord(coord, unit=(u.hourangle, u.deg)), result
 
 
 @attrs
@@ -177,53 +185,44 @@ class Query:
     QUERY_TEMPLATE : multiline str template used for the query
     """
 
-    QUERY_TEMPLATE = """
-    SELECT
-    {row_limit}
-    {columns},
-    DISTANCE(
-        POINT('ICRS', {ra_column}, {dec_column}),
-        POINT('ICRS', {ra}, {dec})
-    ) AS dist
-    FROM
-    {table_name}
-    WHERE
-    1 = CONTAINS(
-        POINT('ICRS', {ra_column}, {dec_column}),
-        CIRCLE('ICRS', {ra}, {dec}, {radius}))
-    """
+    QUERY_TEMPLATE = """SELECT {row_limit}
+{columns},
+DISTANCE(
+    POINT('ICRS', {ra_column}, {dec_column}),
+    POINT('ICRS', {ra}, {dec})
+) AS dist
+FROM {table_name}
+WHERE 1 = CONTAINS(
+    POINT('ICRS', {ra_column}, {dec_column}),
+    CIRCLE('ICRS', {ra}, {dec}, {radius}))"""
 
-    COUNT_QUERY_TEMPLATE = """
-    SELECT COUNT(*)
-    FROM
-    {table_name}
-    WHERE
-    1 = CONTAINS(
-        POINT('ICRS', {ra_column}, {dec_column}),
-        CIRCLE('ICRS', {ra}, {dec}, {radius}))
-    """
+    COUNT_QUERY_TEMPLATE = """SELECT COUNT(*)
+FROM {table_name}
+WHERE 1 = CONTAINS(
+    POINT('ICRS', {ra_column}, {dec_column}),
+    CIRCLE('ICRS', {ra}, {dec}, {radius}))"""
 
-    table = attrib(default=default_table())
-    column_filters = attrib(factory=dict)
-    row_limit = attrib(default=-1)
+    table = attrib(default=Conf().MAIN_GAIA_TABLE)
+    column_filters = attrib(factory=list)
+    row_limit = attrib(default=Conf().ROW_LIMIT)
     radius = attrib(default=None)
     coords = attrib(default=None)
-    ra_name = attrib(default=Gaia.MAIN_GAIA_TABLE_RA)
-    dec_name = attrib(default=Gaia.MAIN_GAIA_TABLE_DEC)
+    ra_name = attrib(default=Conf().MAIN_GAIA_TABLE_RA)
+    dec_name = attrib(default=Conf().MAIN_GAIA_TABLE_DEC)
     columns = attrib(default="*")
 
-    def where(self, column_filters):
-        """Add filters or conditions to the query.
+    @beartype
+    def where(self, column: str, operator: str, value: Union[str, Number]):
+        """Add filter or condition to the query.
 
         Parameters
         ----------
-        column_filters : dict, optional
-            Dictionary of filters: {'column_name' : 'column_filter'}
-            column_name: str
+        column: str
             Valid column in the selected table
-            column_filter: str
-            Must start with '<', '>', '<=', '>='and end with a
-            numeric value.
+        operator: str
+            Must be '<', '>', '<=', '>='
+        value: str, int, float
+            value that defines the condition
 
         Returns
         -------
@@ -231,29 +230,27 @@ class Query:
 
         Raises
         ------
-        ValueError if an attribute does not match type.
+        TypeError if an attribute does not match type.
         KeyError if columns is not '*' and filter has invalid column.
+        ValueError if operator is invalid.
         """
-        if column_filters:
-            if not isinstance(column_filters, dict):
-                raise ValueError(
-                    "column_filters must be dict: {'column': '> value'}"
-                )
-            if self.columns != "*":
-                for col in column_filters.keys():
-                    if col not in self.columns:
-                        raise KeyError("invalid column in filter")
-
-            self.column_filters = {**self.column_filters, **column_filters}
+        if self.columns != "*":
+            if column not in self.columns:
+                raise KeyError(f"invalid column '{column}'")
+        if operator not in ["<", ">", "=", ">=", "<=", "LIKE", "like"]:
+            raise ValueError(f"invalid operator {operator}")
+        if (column, operator, str(value)) not in self.column_filters:
+            self.column_filters.append((column, operator, str(value)))
         return self
 
-    def select(self, columns):
+    @beartype
+    def select(self, *args: str):
         """Select table columns to be retrieved.
 
         Parameters
         ----------
         columns : str or list of str
-            If str, must be '*', indicating all columns
+            If str, must be '*', indicating all columns or one column
             If list of str, must be list of valid column names.
 
         Returns
@@ -264,15 +261,10 @@ class Query:
         ------
         ValueError if an attribute does not match type.
         """
-        if columns != "*" and (
-            not isinstance(columns, list)
-            or not all(isinstance(elem, str) for elem in columns)
-        ):
-            raise ValueError("columns must be list of strings")
-        self.columns = columns
+        self.columns = list(args)
         return self
 
-    @checkargs
+    @beartype
     def from_table(
         self, table: str, ra_name: str = None, dec_name: str = None
     ):
@@ -282,13 +274,13 @@ class Query:
         ----------
         table : str, optional
             Name of the Gaia catalogues table
-            (default is astroquery.gaia.Gaia.MAIN_GAIA_TABLE)
+            (default is 'gaiaedr3.gaia_source')
         ra_name : str, optional
             Name of the column of right ascension column in the selected table.
-            (default is astroquery.gaia.Gaia.MAIN_GAIA_TABLE_RA)
+            (default is 'ra')
         dec_name : str, optional
             Name of the declination column in the selected table.
-            (default is astroquery.gaia.Gaia.MAIN_GAIA_TABLE_DEC)
+            (default is 'dec')
 
         Returns
         -------
@@ -296,7 +288,7 @@ class Query:
 
         Raises
         ------
-        ValueError if an attribute does not match type.
+        TypeError if an attribute does not match type.
         """
         if ra_name:
             self.ra_name = ra_name
@@ -312,16 +304,16 @@ class Query:
         -------
         query : string with built query.
         """
-        if self.columns != "*":
-            columns = ",".join(map(str, self.columns))
+        if isinstance(self.columns, list):
+            columns = ", ".join(map(str, self.columns))
         else:
-            columns = "*"
+            columns = self.columns
 
         if self.radius is not None and self.coords is not None:
             ra_hours, dec = coord_to_radec(self.coords)
             ra = ra_hours * 15.0
 
-        row_limit = f"TOP {self.row_limit}" if self.row_limit > 0 else ""
+        row_limit = f"\nTOP {self.row_limit}" if self.row_limit > 0 else ""
 
         query = self.QUERY_TEMPLATE.format(
             row_limit=row_limit,
@@ -337,19 +329,19 @@ class Query:
         if self.column_filters:
             query_filters = "".join(
                 [
-                    """AND {column} {condition}
-                """.format(
-                        column=column, condition=condition
+                    "\nAND {column} {operator} {condition}".format(
+                        column=column, operator=operator, condition=condition
                     )
-                    for column, condition in self.column_filters.items()
+                    for column, operator, condition in self.column_filters
                 ]
             )
             query += query_filters
 
-        query += """ORDER BY dist ASC"""
+        query += "\nORDER BY dist ASC"
         return query
 
-    def top(self, row_limit):
+    @beartype
+    def top(self, row_limit: int):
         """Set row limit for the query.
 
         Attributes
@@ -366,13 +358,11 @@ class Query:
         ------
         ValueError if an attribute does not match type.
         """
-        if not isinstance(row_limit, int):
-            raise ValueError("row_limit must be int")
         self.row_limit = row_limit
         return self
 
     def get(self, **kwargs):
-        """Build and performe query.
+        """Build and perform query.
 
         Parameters
         ----------
@@ -393,16 +383,18 @@ class Query:
         """
         query = self.build()
 
-        print("launching query")
+        from astroquery.gaia import Gaia
+
+        print("Launching query")
         print(query)
-        print("this may take some time...")
+        print("This may take some time...")
 
         job = Gaia.launch_job_async(query=query, **kwargs)
         if not kwargs.get("dump_to_file"):
             table = job.get_results()
             return table
 
-    def count(self, **kwargs):
+    def build_count(self):
         if self.radius is not None and self.coords is not None:
             ra_hours, dec = coord_to_radec(self.coords)
             ra = ra_hours * 15.0
@@ -419,17 +411,22 @@ class Query:
         if self.column_filters:
             query_filters = "".join(
                 [
-                    """AND {column} {condition}
-                """.format(
-                        column=column, condition=condition
+                    "\nAND {column} {operator} {condition}".format(
+                        column=column, operator=operator, condition=condition
                     )
-                    for column, condition in self.column_filters.items()
+                    for column, operator, condition in self.column_filters
                 ]
             )
             query += query_filters
-        print("launching query")
+        return query
+
+    def count(self, **kwargs):
+        query = self.build_count()
+        from astroquery.gaia import Gaia
+
+        print("Launching query")
         print(query)
-        print("this may take some time...")
+        print("This may take some time...")
         job = Gaia.launch_job_async(query=query, **kwargs)
 
         if not kwargs.get("dump_to_file"):
@@ -437,7 +434,11 @@ class Query:
             return table
 
 
-def query_region(*, ra=None, dec=None, name=None, coord=None, radius):
+@beartype
+def query_region(
+    coords_or_name: Union[Coord, SkyCoord, str],
+    radius: Union[int, float, Quantity],
+):
     """Make a cone search type query for retrieving data.
 
     Parameters
@@ -462,41 +463,41 @@ def query_region(*, ra=None, dec=None, name=None, coord=None, radius):
     ValueError if an attribute does not match type, or if
     both name and ra & dec are provided.
     """
-    if not isinstance(radius, u.quantity.Quantity):
-        raise ValueError("radious must be astropy.units.quantity.Quantity")
-    if not (
-        (name is not None)
-        ^ (ra is not None and dec is not None)
-        ^ (coord is not None)
-    ):
-        raise ValueError("'name' or 'ra' and 'dec' are required (not both)")
-    if name is not None:
-        if not isinstance(name, str):
-            raise ValueError("name must be string")
-        else:
-            coord, _ = simbad_search(name)
-    if (ra, dec) != (None, None):
-        if not isinstance(ra, (float, int)) or not isinstance(
-            dec, (float, int)
-        ):
-            raise ValueError("ra and dec must be numeric")
-        else:
-            coord = SkyCoord(ra, dec, unit=(u.degree, u.degree), frame="icrs")
-    radius_deg = radius_to_unit(radius, unit="deg")
-    query = Query(radius=radius_deg, coords=coord)
+    if isinstance(radius, Quantity):
+        radius = radius_to_unit(radius, unit="deg")
+    if isinstance(coords_or_name, str):
+        coords = simbad_search(coords_or_name).coords
+    elif isinstance(coords_or_name, tuple):
+        coords = SkyCoord(
+            coords_or_name[0],
+            coords_or_name[1],
+            unit=(u.degree, u.degree),
+            frame="icrs",
+        )
+    else:
+        coords = coords_or_name
+    query = Query(radius=radius, coords=coords)
     return query
 
 
-def list_remotes(only_names: bool = True, pattern: str = None, **kwargs):
+@attrs(auto_attribs=True)
+class TableInfo:
+    name: str
+    description: str
+    columns: Table
+
+
+@beartype
+def table_info(search_query: str = None, only_names: bool = False, **kwargs):
     """List available tables in Gaia catalogues.
 
     Parameters
     ----------
-    only_names : bool, optional, default is True
-        Return only table names.
-    pattern: str, optional, return only results
-        that match pattern. Works only if only_names
-        is True
+    only_names: bool, optional, return only table names as list
+        default False
+
+    search_query: str, optional, return only results
+        that match pattern.
 
     Returns
     -------
@@ -505,42 +506,55 @@ def list_remotes(only_names: bool = True, pattern: str = None, **kwargs):
 
     tables: vot table if only_names=False
     """
-    available_tables = Gaia.load_tables(**kwargs)
-    if only_names:
-        names = []
-        for table in available_tables:
-            name = table.get_qualified_name()
-            index = name.index(".") + 1
-            name = name[index:]
-            if not pattern or pattern in name:
-                names.append(name)
-        return names
-    return available_tables
+    from astroquery.gaia import Gaia
+
+    available_tables = Gaia.load_tables(only_names=only_names, **kwargs)
+
+    if search_query:
+        available_tables = [
+            table for table in available_tables if search_query in table.name
+        ]
+
+    tables = []
+    colnames = [
+        "TAP Column name",
+        "Description",
+        "Unit",
+        "Ucd",
+        "Utype",
+        "DataType",
+        "ArraySize",
+        "Flag",
+    ]
+    for table in available_tables:
+        name = table.name
+        desc = table.description
+        if only_names:
+            cols = None
+        else:
+            colvalues = [
+                [
+                    c.name,
+                    c.description,
+                    c.unit,
+                    c.ucd,
+                    c.utype,
+                    c.data_type,
+                    c.arraysize,
+                    c.flag,
+                ]
+                for c in table.columns
+            ]
+            df = pd.DataFrame(colvalues)
+            df.columns = colnames
+            cols = Table.from_pandas(df)
+        tables.append(TableInfo(name=name, description=desc, columns=cols))
+
+    return tables
 
 
-@checkargs
-def remote_info(table: str):
-    """Remote table description and column names.
-
-    Parameters
-    ----------
-    table : str
-        valid table name from Gaia catalogues.
-
-    Returns
-    -------
-    description : str
-        Short text describing contents of the remote table.
-    cols : list of str
-        Column names of the remote table.
-    """
-    table = Gaia.load_table(table)
-    description = f"table = {table}"
-    cols = [column.name for column in table.columns]
-    return description, cols
-
-
-@checkargs
+# DEPRECATED
+@beartype
 def load_file(filepath_or_buffer: (str, io.IOBase)):
     """Load a xml VOT table file as a OCTable instance.
 
@@ -561,10 +575,11 @@ def load_file(filepath_or_buffer: (str, io.IOBase)):
     return OCTable(table)
 
 
+# DEPRECATED
 @checkargs
 def load_remote(
     *,
-    table: str = Gaia.MAIN_GAIA_TABLE,
+    table: str = Conf().MAIN_GAIA_TABLE,
     columns="*",
     filters=None,
     ra=None,
@@ -620,6 +635,7 @@ def load_remote(
         return OCTable(result)
 
 
+# DEPRECATED
 @attrs(frozen=True)
 class OCTable:
     """Class that contains data offers fit methods.
