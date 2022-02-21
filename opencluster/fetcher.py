@@ -151,7 +151,7 @@ def simbad_search(
     )
 
 
-@attrs
+@attrs(auto_attribs=True)
 class Query:
     """Query class to retrieve data from remote gaia catalogues.
 
@@ -202,14 +202,14 @@ WHERE 1 = CONTAINS(
     POINT('ICRS', {ra_column}, {dec_column}),
     CIRCLE('ICRS', {ra}, {dec}, {radius}))"""
 
-    table = attrib(default=Conf().MAIN_GAIA_TABLE)
-    column_filters = attrib(factory=list)
-    row_limit = attrib(default=Conf().ROW_LIMIT)
-    radius = attrib(default=None)
-    coords = attrib(default=None)
-    ra_name = attrib(default=Conf().MAIN_GAIA_TABLE_RA)
-    dec_name = attrib(default=Conf().MAIN_GAIA_TABLE_DEC)
-    columns = attrib(default="*")
+    radius : Number
+    coords : SkyCoord
+    table : str = Conf().MAIN_GAIA_TABLE
+    column_filters : List[str] = attrib(factory=list)
+    row_limit : int = Conf().ROW_LIMIT
+    ra_name : str = Conf().MAIN_GAIA_TABLE_RA
+    dec_name : str = Conf().MAIN_GAIA_TABLE_DEC
+    columns : str = "*"
 
     @beartype
     def where(self, column: str, operator: str, value: Union[str, Number]):
