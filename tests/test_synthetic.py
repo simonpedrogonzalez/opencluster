@@ -5,6 +5,7 @@ import math
 import numpy as np
 import pytest
 
+# TODO: change for test_if_raises_exception
 class Ok:
     pass
 

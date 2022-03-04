@@ -23,7 +23,7 @@ def pyargs2r(rsession, **kwargs):
                 rsession.assign(key, value)
                 params += f'{key}={key},'
             else:
-                raise ValueError('Unsuported py to r variable conversion.')
+                raise TypeError('Unsuported py to r variable conversion.')
     numpy2ri.deactivate()
     return rsession, params[:-1]
 
@@ -38,6 +38,3 @@ def rhardload(rsession, packages: list):
                 utils.install_packages(package)
             rpackages.importr(package)
     return rsession
-    
-def r2np(rmatrix, shape):
-    return np.array(list(rmatrix)).reshape(shape)

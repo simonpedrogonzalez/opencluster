@@ -17,11 +17,18 @@ class Colnames2:
         names = names.parse_to_list()
         return list(self.names - OrderedSet(names))
 
+    def get_data_names(self, names: Union[list, str]=None):
+        data = [name for name in list(self.names) if not name.endswith('_error') and not name.endswith('_corr')]
+        if names is None:
+            return data
+        names = self.parse_to_list(names)
+        return list(OrderedSet(names).intersection(data))
+
     def get_error_names(self, names: Union[list, str]=None):
         errors = [name for name in list(self.names) if name.endswith('_error')]
         if names is None:
-            return errors
-        names = self.parse_to_list(names)
+            names = list(self.names)
+        names = self.get_data_names(self.parse_to_list(names))
         sorted_errors = []
         for name in names:
             for err in errors:
@@ -37,9 +44,8 @@ class Colnames2:
     def get_corr_names(self, names: Union[list, str]=None):
         correlations = [name for name in list(self.names) if name.endswith('_corr')]
         if names is None:
-            return correlations
-        
-        names = self.parse_to_list(names)
+            names = list(self.names)
+        names = self.get_data_names(self.parse_to_list(names))
         
         names_with_corr = []
         for name in names:
@@ -52,8 +58,8 @@ class Colnames2:
         len_nwc = len(names_with_corr)
         if len_nwc == 0:
             return [], True
+
         corr_matrix = np.ndarray(shape=(len_nwc, len_nwc), dtype=f'|S{max([len(name) for name in names_with_corr + correlations])}')
-        
         for i1, var1 in enumerate(names_with_corr):
             for i2, var2 in enumerate(names_with_corr):
                 corr1 = f'{var1}_{var2}_corr'
@@ -63,6 +69,7 @@ class Colnames2:
         
         sorted_correlations = list(corr_matrix[np.tril_indices(len(names_with_corr), k=-1)].astype(str))
         missing_correlations = len(names_with_corr) != len(names) or any(name == '' for name in sorted_correlations)
+        sorted_correlations = [sc for sc in sorted_correlations if sc != '']
         return sorted_correlations, missing_correlations 
 
     def parse_to_list(self, names: Union[list, str]):
