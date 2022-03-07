@@ -1,7 +1,7 @@
 import pytest
 
-def test_if_raises_exception(exception, fun):
-    if issubclass(exception, Exception):
+def raises_exception(exception, fun):
+    if exception is not None and issubclass(exception, Exception):
         with pytest.raises(exception):
             fun()
     else:

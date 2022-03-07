@@ -1,19 +1,9 @@
-import os
-import re
-from io import BytesIO
-from itertools import chain
-
-import astropy.units as u
 import numpy as np
 import pytest
-from astropy.coordinates import SkyCoord
 from astropy.table.table import Table
-from scipy import stats
 from scipy.stats._multivariate import multi_rv_frozen
 from utils import raises_exception
-
-from opencluster.hkde import HKDE, PluginSelector
-from opencluster.hkde import r as rsession
+from opencluster.hkde import HKDE, PluginSelector, r as rsession
 from opencluster.rutils import rhardload
 from opencluster.utils import Colnames2
 
@@ -31,10 +21,7 @@ w = np.ones(n)
 
 @pytest.fixture
 def kskde():
-    from rpy2.robjects import numpy2ri
-    from rpy2.robjects import packages as rpackages
-    from rpy2.robjects import r
-    from rpy2.robjects.packages import importr
+    from rpy2.robjects import numpy2ri, r
 
     rhardload(r, ["ks"])
     numpy2ri.activate()
@@ -114,11 +101,13 @@ class TestBandwidths:
         correct_command,
         correct_result,
     ):
-        get_bw = lambda: PluginSelector(
-            nstage=nstage, pilot=pilot, binned=binned, diag=diag
-        ).build_r_command(data)
         if exception is None:
-            command = raises_exception(exception, get_bw)
+            command = raises_exception(
+                exception,
+                lambda: PluginSelector(
+                    nstage=nstage, pilot=pilot, binned=binned, diag=diag
+                ).build_r_command(data),
+            )
             # verify command
             assert command == correct_command
             # verify vars are correctly set
@@ -130,7 +119,7 @@ class TestBandwidths:
             for param in params:
                 if param[1] is not None:
                     assert rsession(f"{param[0]}").r_repr() == param[2]
-            assert np.all(np.isclose(np.asarray(rsession(f"x")), data))
+            assert np.all(np.isclose(np.asarray(rsession("x")), data))
 
             bw = PluginSelector(
                 nstage=nstage, pilot=pilot, binned=binned, diag=diag
@@ -176,10 +165,10 @@ class TestHKDE:
         ],
     )
     def test_get_bw_matrices(self, bw, exception, correct):
-        get_bw = (
-            lambda: HKDE(bw=bw, d=d, n=n).set_weights(w).get_bw_matrices(data)
+        result = raises_exception(
+            exception,
+            lambda: HKDE(bw=bw, d=d, n=n).set_weights(w).get_bw_matrices(data),
         )
-        result = raises_exception(exception, get_bw)
         if exception is None:
             assert result.shape == (n, d, d)
             assert np.allclose(result[0], correct)
@@ -218,8 +207,9 @@ class TestHKDE:
         ],
     )
     def test_get_corr_matrices(self, corr_param, exception, correct):
-        get_corr_mat = lambda: HKDE(d=d, n=n).get_corr_matrices(corr_param)
-        result = raises_exception(exception, get_corr_mat)
+        result = raises_exception(
+            exception, lambda: HKDE(d=d, n=n).get_corr_matrices(corr_param)
+        )
         if exception is None:
             assert result.shape == (n, d, d)
             assert np.allclose(result[0], correct)
@@ -263,10 +253,10 @@ class TestHKDE:
         ],
     )
     def test_get_err_matrices(self, err_param, corr_param, exception, correct):
-        get_err_mat = lambda: HKDE(d=d, n=n).get_err_matrices(
-            err_param, corr_param
+        result = raises_exception(
+            exception,
+            lambda: HKDE(d=d, n=n).get_err_matrices(err_param, corr_param),
         )
-        result = raises_exception(exception, get_err_mat)
         if exception is None:
             assert result.shape == (n, d, d)
             assert np.allclose(result[0], correct)
@@ -314,8 +304,9 @@ class TestHKDE:
         ],
     )
     def test_set_weights(self, weights, exception, n_eff, eff_mask):
-        setw = lambda: HKDE(n=n).set_weights(weights)
-        result = raises_exception(exception, setw)
+        result = raises_exception(
+            exception, lambda: HKDE(n=n).set_weights(weights)
+        )
         if exception is None:
             assert isinstance(result, HKDE)
             assert result.n_eff == n_eff

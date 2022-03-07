@@ -21,10 +21,14 @@ from scipy.stats import gaussian_kde, halfnorm, multivariate_normal
 from statsmodels.nonparametric.bandwidths import bw_scott, bw_silverman
 from statsmodels.nonparametric.kernel_density import KDEMultivariate
 from statsmodels.stats.correlation_tools import corr_nearest
+from astropy.table.table import Table
+import beartype
+from numpy import ndarray
+from numbers import Number
 
 sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
-from opencluster.rutils import pyargs2r, r2np, rclean, rhardload
-
+from opencluster.rutils import pyargs2r, rclean, rhardload
+from opencluster.utils import Colnames2
 from opencluster.synthetic import (
     Cluster,
     Field,
@@ -40,65 +44,43 @@ from opencluster.synthetic import (
 # prepare r packages
 rhardload(r, ["ks"])
 
-
-# TODO: move to testing file
-def rkde(data):
-    from rpy2.robjects import numpy2ri
-    from rpy2.robjects import packages as rpackages
-    from rpy2.robjects import r
-    from rpy2.robjects.packages import importr
-
-    numpy2ri.activate()
-    # from rpy2.robjects.vectors import StrVector
-    # rpackages_names = StrVector(('ks', ... ))
-    try:
-        importr("ks")
-    except Exception:
-        utils = rpackages.importr("utils")
-        utils.chooseCRANmirror(ind=1)
-        utils.install_packages("ks")
-        importr("ks")
-    obs, dims = data.shape
-
-    r.assign("data", data)
-    r('result <- kde(data, eval.points=data, H=Hpi(data, pilot="unconstr"))')
-    H = r2np(r('result["H"]'), (dims, dims))
-    pdf = r2np(r('result["estimate"]'), (obs,))
-    return pdf, H
-
-
-class Bandwidth:
+class BandwidthSelector:
     @abstractmethod
-    def H(data, *args, **kwargs):
+    def get_bandwidth(data, *args, **kwargs):
         pass
 
 
 @attrs(auto_attribs=True)
-class PluginBandwidth(Bandwidth):
+class PluginSelector(BandwidthSelector):
     nstage: int = None
     pilot: str = None
     binned: bool = None
     diag: bool = False
 
-    def H(self, data):
-
-        _, dims = data.shape
+    #@beartype
+    def build_r_command(self, data: ndarray):
         params = copy.deepcopy(self.__dict__)
         diag = params.pop("diag")
-
         # delete all previous session variables
         rclean(r, "var")
         _, rparams = pyargs2r(r, x=data, **params)
-        result = r(f'ks::Hpi{".diag" if diag else ""}({rparams})')
-        return r2np(result, (dims, dims))
+        return f'ks::Hpi{".diag" if diag else ""}({rparams})'
+
+    #@beartype
+    def get_bandwidth(self, data: ndarray):
+        _, dims = data.shape
+        command = self.build_r_command(data)
+        result = r(command)
+        return np.asarray(result)
 
 
 @attrs(auto_attribs=True)
 class HKDE:
 
-    bw: Union[Bandwidth, int, float] = PluginBandwidth()
+    bw: Union[BandwidthSelector, Number, ndarray] = PluginSelector()
     kernels: np.ndarray = None
     covariances: np.ndarray = None
+    data: np.ndarray = None
     n: float = None
     n_eff: float = None
     d: int = None
@@ -107,145 +89,99 @@ class HKDE:
     maxs: np.ndarray = None
     mins: np.ndarray = None
 
-    def get_sigmas(self, data: np.ndarray, err: np.ndarray):
-        obs, dims = data.shape
-        # inherent distribution variance values
-        if isinstance(self.bw, Bandwidth):
-            self.bw.diag = True
-            variance = np.diag(self.bw.H(data[self.eff_mask]))
-        elif isinstance(self.bw, (int, float)):
-            variance = np.ones(dims) * self.bw
-        elif isinstance(self.bw, (np.ndarray, list)):
-            bw = np.array(self.bw)
-            if bw.shape != (dims,):
-                raise ValueError("Wrong shape in bw array")
-            variance = bw
-        if err is None:
-            sigmas = np.sqrt(variance)
-            return np.repeat(sigmas[:, np.newaxis], obs, 1).T
-        elif data.shape != err.shape:
-            raise ValueError(
-                "error matrix and data matrix shapes do not match"
+    def get_err_matrices(self, err: np.ndarray, corr: np.ndarray = None):
+        if err.shape != (self.n, self.d):
+            raise ValueError('error array must have the same shape as data array.')
+        if corr is None:
+            return np.apply_along_axis(
+                lambda x: np.diag(x**2), -1, err
             )
-        else:
-            # TODO: check
-            variance_with_err = err ** 2 + variance ** 2
-            sigmas = np.sqrt(variance_with_err)
-            return sigmas
+        corr_matrices = self.get_corr_matrices(corr)
+        return np.apply_along_axis(
+            lambda x: x * np.atleast_2d(x).T, -1, err
+        ) * corr_matrices
 
-    def get_corr_coefs(self, data: np.ndarray, corr: Union[np.ndarray, str]):
-        obs, dims = data.shape
+    def get_corr_matrices(self, corr: np.ndarray):
+        n, d = (self.n, self.d)
         # correlation is given
-        if isinstance(corr, str):
-            if corr == "zero":
-                corrs = np.zeros((obs, dims, dims))
-                diag_idcs = tuple(
-                    map(
-                        tuple,
-                        np.vstack(
-                            (
-                                np.arange(obs).repeat(dims),
-                                np.tile(
-                                    np.array(np.diag_indices(dims)), (obs,)
-                                ),
-                            )
-                        ),
-                    )
-                )
-                corrs[diag_idcs] = 1
-                return corrs
-            elif (
-                corr == "auto"
-            ):  # correlation is not given, calculate from data
-                # this may be theorically incorrect in the case
-                # of pm plx, but may be useful in other contexts
-                return (
-                    np.repeat(
-                        corr_nearest(np.corrcoef(data, rowvar=False)),
-                        repeats=obs,
-                        axis=1,
-                    )
-                    .reshape((dims, dims, obs))
-                    .T
-                )
-
-        elif isinstance(corr, np.ndarray):
-            # is array
-            if corr.shape == (dims, dims):
-                # correlation is given as global correlation matrix per dims
-                return (
-                    np.repeat(corr, repeats=obs, axis=1)
-                    .reshape((dims, dims, obs))
-                    .T
-                )
-            elif corr.shape == (obs, int(dims * (dims - 1) / 2)):
-                # correlation is given per observation per obs, per dims
-                # pairwise corr coef
-                # (no need for the 1s given by corr(samevar, samevar))
-                # per observation. Example: for 1 obs and 4 vars, lower triangle of corr
-                # matrix looks like:
-                # 12
-                # 13 23
-                # 14 24 34
-                # method should receive obs1 => [12, 13, 23, 14, 24, 34]
-                n_corrs = corr.shape[1]
-                corrs = np.zeros((obs, dims, dims))
-                tril_idcs = tuple(
-                    map(
-                        tuple,
-                        np.vstack(
-                            (
-                                np.arange(obs).repeat(n_corrs),
-                                np.tile(
-                                    np.array(np.tril_indices(dims, k=-1)),
-                                    (obs,),
-                                ),
-                            )
-                        ),
-                    )
-                )
-                corrs[tril_idcs] = corr.ravel()
-                corrs = corrs + np.transpose(corrs, (0, 2, 1))
-                diag_idcs = tuple(
-                    map(
-                        tuple,
-                        np.vstack(
-                            (
-                                np.arange(obs).repeat(dims),
-                                np.tile(
-                                    np.array(np.diag_indices(dims)), (obs,)
-                                ),
-                            )
-                        ),
-                    )
-                )
-                corrs[diag_idcs] = 1
-                return corrs
-            else:
-                raise ValueError("Wrong corr dimensions")
-        raise ValueError("Wrong corr parameter")
-
-    def get_cov_matrices(self, data, err, corr):
-        obs, dims = data.shape
-        # checked
-        if err is None and corr == "auto" and isinstance(self.bw, Bandwidth):
-            # calculate full H from plugin method
-            cov = self.bw.H(data[self.eff_mask])
-            # repeat covariance for each obs
-            return np.repeat(cov[:, np.newaxis], obs, 1).swapaxes(0, 1)
-        # TODO: check
-        else:
-            # get sigma value for each dimension
-            sigmas = self.get_sigmas(data, err)
-            # get correlation coefficients
-            corr_coefs = self.get_corr_coefs(data, corr)
-            # get covariance matrices Sdxd per observations, where each element is
-            # sigmai*sigmaj for i,j = 1,...,dims
-            cross_sigmas = np.apply_along_axis(
-                lambda x: x * np.atleast_2d(x).T, -1, sigmas
+        # is array
+        if corr.shape == (d, d):
+            # correlation is given as global correlation matrix per dims
+            # first try to find nearest correct correlation
+            # it ensures matrix is positive semidefinite
+            corr = corr_nearest(corr)
+            if not np.allclose(np.diag(corr), np.ones(d)):
+                raise ValueError("Correlation matrix must have 1 in diagonal")
+            return (
+                np.repeat(corr, repeats=n, axis=1)
+                .reshape((d, d, n))
+                .T
             )
-            cov = cross_sigmas * corr_coefs
-        return cov
+        elif corr.shape == (n, int(d * (d - 1) / 2)):
+            # correlation is given per observation per obs, per dims
+            # pairwise corr coef
+            # (no need for the 1s given by corr(samevar, samevar))
+            # per observation. Example: for 1 obs and 4 vars, lower triangle of corr
+            # matrix looks like:
+            # 12
+            # 13 23
+            # 14 24 34
+            # method should receive obs1 => [12, 13, 23, 14, 24, 34]
+            n_corrs = corr.shape[1]
+            corrs = np.zeros((n, d, d))
+            tril_idcs = tuple(
+                map(
+                    tuple,
+                    np.vstack(
+                        (
+                            np.arange(n).repeat(n_corrs),
+                            np.tile(
+                                np.array(np.tril_indices(d, k=-1)),
+                                (n,),
+                            ),
+                        )
+                    ),
+                )
+            )
+            corrs[tril_idcs] = corr.ravel()
+            corrs = corrs + np.transpose(corrs, (0, 2, 1))
+            diag_idcs = tuple(
+                map(
+                    tuple,
+                    np.vstack(
+                        (
+                            np.arange(n).repeat(d),
+                            np.tile(
+                                np.array(np.diag_indices(d)), (n,)
+                            ),
+                        )
+                    ),
+                )
+            )
+            corrs[diag_idcs] = 1
+            return corrs
+        else:
+            raise ValueError("Wrong corr dimensions")
+
+    def get_bw_matrices(self, data: np.ndarray):
+        if isinstance(self.bw, BandwidthSelector):
+            bw_matrix = self.bw.get_bandwidth(data[self.eff_mask])
+        elif isinstance(self.bw, np.ndarray):
+            if len(self.bw.shape) == 1 and self.bw.shape[0] == self.d:
+                bw_matrix = np.diag(self.bw)
+            elif self.bw.shape == (self.d, self.d):
+                bw_matrix = self.bw
+            else:
+                raise ValueError('Incorrect shape of bandwidth array')
+        return np.repeat(bw_matrix[:, np.newaxis], self.n, 1).swapaxes(0, 1)
+        
+    def get_cov_matrices(self, data: np.ndarray, err:np.ndarray=None, corr: np.ndarray=None):
+        bw_matrices = self.get_bw_matrices(data)
+        if err is None and corr is None:
+            return bw_matrices
+        err_matrices = self.get_err_matrices(err, corr)
+        # sum of covariance matrices convolves a kernel for bw and a kernel for error
+        return bw_matrices + err_matrices
 
     def set_weights(self, weights: np.ndarray):
         if len(weights.shape) != 1:
@@ -255,16 +191,74 @@ class HKDE:
         if weights.shape[0] != self.n:
             raise ValueError("Data must have same n as weights.")
         self.weights = weights
-        self.n_eff = np.sum(self.weights)
         # default atol used by numpy isclose is 1e-08
         self.eff_mask = self.weights > 1e-08
+        self.n_eff = np.sum(self.weights[self.eff_mask])
         return self
-
-    def fit(
+    
+    """
+    # error convolution options (very slow) 
+    def fit2(
         self,
         data: np.ndarray,
         err: np.ndarray = None,
         corr: Union[np.ndarray, str] = "auto",
+        weights: np.ndarray = None,
+        *args,
+        **kwargs,
+    ):
+        self.n, self.d = data.shape
+        self.data = data
+
+        self.maxs = data.max(axis=0)
+        self.mins = data.min(axis=0)
+
+        weights = weights if weights is not None else np.ones(self.n)
+        self.set_weights(weights)
+
+        print("getting cov")
+        self.covariances = self.get_cov_matrices(data, err, corr)
+        # convolve each pair of covariances
+        self.covariances = self.covariances + self.covariances[:,None,:,:]
+        return self
+    """
+    """ 
+    # error convolution options (very slow)
+    def pdf2(self):
+
+        print("eval")
+        if self.n_eff <= 0:
+            return np.zeros(self.n)
+
+        pdf = np.zeros(self.n)
+        weights = self.weights[self.eff_mask]
+        n = self.n_eff
+
+        # put weights and normalization toghether in each step
+        # pdf(point) = sum(ki(point)*wi/(sum(w)-wi))
+
+        # TODO: include xi dispersion when getting sum(kj(xi))
+        # should be sum((kj*ki)(xi)), that is, convolve ki with kj.
+        # should be equivalent to aggregating Hi to Hj cuadratically
+        data = self.data[self.eff_mask]
+        eval_points = self.data
+
+        # norm_weights.sum() gives 1 + some little value,wich will be substracted in the k[i].pdf(i) case 
+        norm_weights = weights / (n - weights)
+        for i, eval_point in enumerate(eval_points):
+            sum_on_eval_point = 0
+            for j, data_point in enumerate(data):
+                sum_on_eval_point += multivariate_normal(data_point, self.covariances[i, j]).pdf(eval_point) * norm_weights[j]
+            sum_on_eval_point -= multivariate_normal(eval_point, self.covariances[i, i]).pdf(eval_point) * norm_weights[i]
+            pdf[i] = sum_on_eval_point
+        return pdf
+    """
+    
+    def fit(
+        self,
+        data: np.ndarray,
+        err: np.ndarray = None,
+        corr: np.ndarray = None,
         weights: np.ndarray = None,
         *args,
         **kwargs,
@@ -295,15 +289,15 @@ class HKDE:
         print("done fit")
         return self
 
-    def check_fitted(self):
-        if self.kernels is None or self.weights is None:
+    def check_is_fitted(self):
+        if self.kernels is None or self.weights is None or self.n_eff is None or self.eff_mask is None or self.covariances is None:
             raise Exception(
                 "Model not fitted. Try excecuting fit function first."
             )
-        return
+        return True
 
     def pdf(self, eval_points: np.ndarray, leave1out=False):
-        self.check_fitted()
+        self.check_is_fitted()
         obs, dims = eval_points.shape
         if dims != self.d:
             raise ValueError("Eval points must have same dims as data.")
@@ -326,13 +320,14 @@ class HKDE:
         # should be sum((kj*ki)(xi)), that is, convolve ki with kj.
         # should be equivalent to aggregating Hi to Hj cuadratically
 
-        norm_weights = weights / (n - weights)
         if leave1out:
+            norm_weights = weights / (n - weights)
             for i, k in enumerate(kernels):
                 applied_k = k.pdf(eval_points) * norm_weights[i]
                 applied_k[i] = 0
                 pdf += applied_k
         else:
+            norm_weights = weights / n
             for i, k in enumerate(kernels):
                 applied_k = k.pdf(eval_points) * norm_weights[i]
                 pdf += applied_k
@@ -348,7 +343,7 @@ class HKDE:
         colnames=None,
         **kwargs,
     ):
-        self.check_fitted()
+        self.check_is_fitted()
         # prepare data to plot
         n = grid_resolution
         linspaces = tuple(np.linspace(self.mins, self.maxs, num=n).T)
@@ -621,10 +616,10 @@ def test_diff_bw_options():
     kde_default = HKDE().fit(d)
     H_default = kde_default.covariances[0]
     pdf_default = kde_default.pdf(d)
-    kde_unconstr = HKDE(bw=PluginBandwidth(pilot="unconstr")).fit(d)
+    kde_unconstr = HKDE(bw=PluginSelector(pilot="unconstr")).fit(d)
     H_unconstr = kde_unconstr.covariances[0]
     pdf_unconstr = kde_default.pdf(d)
-    kde_binned = HKDE(bw=PluginBandwidth(binned=True)).fit(d)
+    kde_binned = HKDE(bw=PluginSelector(binned=True)).fit(d)
     H_binned = kde_binned.covariances[0]
     pdf_binned = kde_default.pdf(d)
 
@@ -683,7 +678,21 @@ def test_kdeplot():
     hkde.density_plot(grid_resolution=100)
     print("coso")
 
-
+def test_new_way():
+    df = Table.read("tests/data/ngc2527_small.xml").to_pandas()
+    cnames = Colnames2(df.columns.to_list())
+    datanames = cnames.get_data_names(["pmra", "pmdec", "parallax"])
+    errornames, _ = cnames.get_error_names()
+    corrnames, _ = cnames.get_corr_names()
+    data = df[datanames].to_numpy()
+    err = df[errornames].to_numpy()
+    corr = df[corrnames].to_numpy()
+    n, d = data.shape
+    w = np.ones(n)
+    hkde = HKDE().fit2(data=data, err=err, corr=corr, weights=w)
+    hkde.pdf2()
+    print('coso')
+# test_new_way()
 # test_performance()
 # test_weights()
 # test_kdeplot()
