@@ -38,6 +38,7 @@ from opencluster.fetcher import (
     table_info,
 )
 
+
 # TODO: change for utils test_if_raises_exception
 class Ok:
     pass
