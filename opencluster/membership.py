@@ -32,7 +32,7 @@ from sklearn.neighbors import KernelDensity
 from sklearn.model_selection import GridSearchCV
 from statsmodels.nonparametric.kernel_density import KDEMultivariate
 from KDEpy import FFTKDE
-from opencluster.hkde import HKDE, PluginBandwidth
+from opencluster.hkde import HKDE, PluginSelector
 from sklearn.metrics import pairwise_distances
 
 def pair(data, mem=None, labels=None):

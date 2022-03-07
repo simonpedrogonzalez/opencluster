@@ -21,7 +21,7 @@ from sklearn.preprocessing import RobustScaler
 
 sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
 
-from opencluster.hkde import HKDE, PluginBandwidth
+from opencluster.hkde import HKDE, PluginSelector
 from opencluster.synthetic import one_cluster_sample_small
 from opencluster.utils import combinations
 from opencluster.fetcher import load_file
@@ -275,7 +275,7 @@ def test_membership():
     estimator = DensityBasedMembershipEstimator(
         min_cluster_size=50,
         n_iters=30,
-        pdf_estimator=HKDE(bw=PluginBandwidth(diag=True)),
+        pdf_estimator=HKDE(bw=PluginSelector(diag=True)),
         iter_pdf_update=False,
     )
     result = estimator.fit_predict(data)
@@ -316,7 +316,7 @@ def test_membership_real():
     estimator = DensityBasedMembershipEstimator(
         min_cluster_size=213,
         n_iters=200,
-        pdf_estimator=HKDE(bw=PluginBandwidth(diag=True)),
+        pdf_estimator=HKDE(bw=PluginSelector(diag=True)),
         iter_pdf_update=False,
         allow_single_cluster=True,
     )
