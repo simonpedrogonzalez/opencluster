@@ -1,12 +1,12 @@
 import os
 import sys
 from abc import abstractmethod
-from typing import Optional, Union
+from typing import Optional, Union, List
 from warnings import warn
 
 import numpy as np
 from astropy.stats.sigma_clipping import sigma_clipped_stats
-from attr import attrs
+from attr import attrs, attrib
 from scipy import ndimage
 from skimage.feature import peak_local_max
 import seaborn as sns
@@ -166,7 +166,7 @@ def get_most_significant_peaks(peaks: list):
 
 @attrs(auto_attribs=True)
 class DetectionResult:
-    peaks: list = []
+    peaks: List[Peak] = attrib(factory=list)
     heatmaps = None
 
 
@@ -294,9 +294,9 @@ class CountPeakDetector(PeakDetector):
             std = fast_std_filter(hist, mask=mask)
             # err_hist = sqrt(hist)
             # err_smoothed = std(smoothed)
-            # err_sharp = err_hist^2 + err_smoothed^2
+            # err_sharp = sqrt(err_hist^2 + err_smoothed^2)
             # normalized = sharp / err_sharp
-            # +1 is added to avoid zero division
+            # +1 is added to avoid zero division errors
             normalized = sharp / np.sqrt(hist + std**2 + 1)
 
             if self.min_dif is not None:
