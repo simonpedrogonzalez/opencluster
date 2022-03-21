@@ -44,7 +44,8 @@ from beartype import beartype
 from typing_extensions import Annotated
 
 Coord = Tuple[Number, Number]
-
+Condition = Tuple[str, str, Union[str, Number]]
+LogicalExpression = Tuple[str, str, str, Union[str, Number]]
 
 @attrs(auto_attribs=True)
 class Conf:
@@ -205,14 +206,14 @@ WHERE 1 = CONTAINS(
     radius : Number
     coords : SkyCoord
     table : str = Conf().MAIN_GAIA_TABLE
-    column_filters : List[str] = attrib(factory=list)
+    column_filters : List[LogicalExpression] = attrib(factory=list)
     row_limit : int = Conf().ROW_LIMIT
     ra_name : str = Conf().MAIN_GAIA_TABLE_RA
     dec_name : str = Conf().MAIN_GAIA_TABLE_DEC
     columns : str = "*"
 
     @beartype
-    def where(self, column: str, operator: str, value: Union[str, Number]):
+    def where(self, condition: Union[Condition, List[Condition]]):
         """Add filter or condition to the query.
 
         Parameters
@@ -234,13 +235,52 @@ WHERE 1 = CONTAINS(
         KeyError if columns is not '*' and filter has invalid column.
         ValueError if operator is invalid.
         """
+        if isinstance(condition, list):
+            for i, cond in enumerate(condition):
+                column, operator, value = cond
+                self.validate_column(column)
+                self.validate_operator(operator)
+                self.column_filters.append(('AND', column, operator, value))
+        else:
+            column, operator, value = condition
+            self.validate_column(column)
+            self.validate_operator(operator)
+            self.column_filters.append(('AND', column, operator, value))
+        return self
+
+    @beartype
+    def validate_column(self, column: str):
         if self.columns != "*":
             if column not in self.columns:
                 raise KeyError(f"invalid column '{column}'")
+
+    @beartype
+    def validate_operator(self, operator: str):
         if operator not in ["<", ">", "=", ">=", "<=", "LIKE", "like"]:
             raise ValueError(f"invalid operator {operator}")
-        if (column, operator, str(value)) not in self.column_filters:
-            self.column_filters.append((column, operator, str(value)))
+
+
+    @beartype
+    def or_where(self, condition: Union[Condition, List[Condition]]):
+        if isinstance(condition, list):
+            first = condition.pop(0)
+        else:
+            first = condition
+        column, operator, value = first
+        self.validate_column(column)
+        self.validate_operator(operator)
+        self.column_filters.append(('AND (', column, operator, value))
+        
+        if isinstance(condition, list):
+            for i, cond in enumerate(condition):
+                column, operator, value = cond
+                self.validate_column(column)
+                self.validate_operator(operator)
+                self.column_filters.append(('OR', column, operator, value))
+
+        last = self.column_filters.pop(-1)
+        new_last = (last[0], last[1], last[2], str(last[3]) + ' )')
+        self.column_filters.append(new_last)
         return self
 
     @beartype
@@ -329,10 +369,8 @@ WHERE 1 = CONTAINS(
         if self.column_filters:
             query_filters = "".join(
                 [
-                    "\nAND {column} {operator} {condition}".format(
-                        column=column, operator=operator, condition=condition
-                    )
-                    for column, operator, condition in self.column_filters
+                    f"\n{logical_operator} {column} {comparison_operator} {value}"
+                    for logical_operator, column, comparison_operator, value in self.column_filters
                 ]
             )
             query += query_filters
