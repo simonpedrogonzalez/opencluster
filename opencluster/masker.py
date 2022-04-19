@@ -7,6 +7,12 @@ from attr import attrs
 
 import numpy as np
 
+from sklearn.metrics import pairwise_distances
+from scipy.spatial import ConvexHull
+from matplotlib import pyplot as plt
+import seaborn as sns
+
+
 sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
 from opencluster.synthetic import is_inside_circle, is_inside_sphere
 
@@ -64,3 +70,51 @@ class CenterMasker(DataMasker):
             return is_inside_circle(center, radius, data[:, 0:2])
         else:
             return is_inside_sphere(center, radius, data[:, 0:3])
+
+@attrs(auto_attribs=True)
+class DistanceMasker(DataMasker):
+    center: Union[list, np.ndarray, str] = 'geometric'
+    percentage: Union[int, float] = 10
+    metric: str = 'euclidean'
+    mode: str = 'furthest'
+
+    def mask(self, data: np.ndarray):
+        if isinstance(self.center, str):
+            if self.center == 'geometric':
+                center = data.min(axis=0) + (data.max(axis=0) - data.min(axis=0)) / 2
+            else:
+                raise NotImplementedError()
+        distances = pairwise_distances(data, center.reshape(1, -1), metric=self.metric).ravel()
+        n_obs = int(np.round(self.percentage / 100 * data.shape[0]))
+        idcs = np.argpartition(distances, -n_obs)[-n_obs:]
+        mask = np.zeros_like(distances).astype('bool')
+        mask[idcs] = True
+        if self.mode == 'closest':
+            return ~mask
+        elif self.mode == 'furthest':
+            return mask
+        else:
+            raise ValueError('Invalid mode')
+
+@attrs(auto_attribs=True)
+class CrustMasker(DataMasker):
+    percentage: Union[int, float] = 10
+    mode: str = 'crust'
+    def mask(self, data: np.ndarray):
+        n = data.shape[0]
+        n_obs = int(np.round(self.percentage / 100 * n))
+        ch = ConvexHull(data)
+        mask = np.zeros(n).astype(bool)
+        mask[ch.vertices] = True
+        idcs = np.where(~mask)[0]
+
+        while(mask.sum() < n_obs):
+            data_iter = data[~mask]
+            ch = ConvexHull(data_iter)
+            submask = np.zeros(data_iter.shape[0]).astype(bool)
+            submask[ch.vertices] = True
+            mask[idcs[submask]] = True
+            idcs = np.where(~mask)[0]
+        
+        return mask
+

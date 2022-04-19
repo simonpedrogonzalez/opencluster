@@ -39,6 +39,7 @@ from opencluster.masker import RangeMasker
 from opencluster.membership2 import DensityBasedMembershipEstimator
 from opencluster.synthetic import three_clusters_sample
 from opencluster.utils import Colnames2
+from astropy.table.table import Table
 
 
 class Pipeline:
@@ -54,18 +55,22 @@ class PipelineResult:
 
 @attrs(auto_attribs=True)
 class PMPlxPipeline(Pipeline):
-    def process(self, df, cluster_count=3):
+    def process(self, df, cluster_count=1):
         # only usable columns are going to be used
         # other data is going to be ignored
 
         obs, dims = df.shape
 
         df["idx"] = np.arange(obs)
+        
 
         colnames = Colnames2(df.columns)
+        if not len(colnames.get_data_names('log10_parallax')):
+            df['log10_parallax'] = np.log10(df['parallax'].to_numpy())
         detection_cols = ["pmra", "pmdec", "log10_parallax"]
-
-        bin_shape = [0.5, 0.5, 0.05]
+        
+        df = df.dropna()
+        bin_shape = [.5, .5, 0.05]
         detection_data = df[detection_cols].to_numpy()
 
         detector = CountPeakDetector(
@@ -75,9 +80,11 @@ class PMPlxPipeline(Pipeline):
         )
         detection_res = detector.detect(data=detection_data, heatmaps=True)
 
-        sigma_multiplier = 1.5
+        sigma_multiplier = 7.5
 
-        membership_cols = ["pmra", "pmdec", "parallax"]
+        membership_cols = ["ra", "dec", "pmra", "pmdec", "parallax"]
+        #membership_cols = ["pmra", "pmdec", "parallax"]
+        
         n_vars = len(membership_cols)
         err_cols, missing_err = colnames.get_error_names(membership_cols)
         corr_cols, missing_corr = colnames.get_corr_names(membership_cols)
@@ -91,9 +98,9 @@ class PMPlxPipeline(Pipeline):
             membership_cols += corr_cols
             n_corrs = len(corr_cols)
         else:
-            corr = "zero"
+            corr = None
 
-        membership_cols += ["idx"]
+        membership_cols += ["idx", "phot_g_mean_mag", "bp_rp"]
 
         membership_data = df[membership_cols].to_numpy()
 
@@ -110,9 +117,14 @@ class PMPlxPipeline(Pipeline):
             detection_mask = RangeMasker(limits).mask(detection_data)
             detection_subset = detection_data[detection_mask]
 
+            
             # remove next 2 lines if want to use center recalculation
             membership_mask = detection_mask
             membership_subset = membership_data[membership_mask]
+            
+            # write file for testing
+            Table.from_pandas(pd.DataFrame(membership_subset, columns=membership_cols)).write(f'ng2527_cured_x{round(sigma_multiplier, 2)}.xml', format='votable', overwrite=True)
+            #print('stop')
 
             # recalculate center with kde
             # scaler = RobustScaler().fit(np.vstack((detection_subset, limits.T)))
@@ -144,14 +156,15 @@ class PMPlxPipeline(Pipeline):
             # TODO: check
             data = membership_subset[:, :n_vars]
             if not missing_err:
-                err = data[:, n_vars : n_vars + n_errs]
+                err = membership_subset[:, n_vars : n_vars + n_errs]
             if not missing_corr:
-                corr = data[:, n_vars + n_errs : n_vars + n_errs + n_corrs]
+                corr = membership_subset[:, n_vars + n_errs : n_vars + n_errs + n_corrs]
 
             mestimator = DensityBasedMembershipEstimator(
                 min_cluster_size=int(peak.count),
-                iter_pdf_update=True,
+                iter_pdf_update=False,
                 n_iters=30,
+                iteration_atol=1e-3
             )
             membership_estimators.append(mestimator)
             mres = mestimator.fit_predict(data)
@@ -204,6 +217,15 @@ def test_PMPlxPipeline():
     plt.show()
     print("coso")
 
+def test_PMPlxPipeline_real_data():
+    print('reading')
+    ngc2527 = "scripts/data/clusters_phot/ngc2527.xml"
+    s = "scripts/data/clusters_phot/ngc2527.xml"
+    df = Table.read(ngc2527).to_pandas()
+    print('processing')
+    PMPlxPipeline().process(df)
 
-# test_PMPlxPipeline()
+
+#test_PMPlxPipeline()
+test_PMPlxPipeline_real_data()
 

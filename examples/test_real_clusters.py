@@ -84,17 +84,17 @@ _, n_clus = p.shape
 data_to_plot = data[['pmra', 'pmdec', 'log10_parallax']].to_numpy()
 
 for n in range(n_clus):
-    sns.scatterplot(data.ra, data.dec, hue=p[:, n], size=p[:, n], hue_norm=(0, 1)).set(
+    """ sns.scatterplot(data.ra, data.dec, hue=p[:, n], size=p[:, n], hue_norm=(0, 1)).set(
         title=f"p(x∈C{n}) ra-dec"
     )
-    plt.figure()
+    plt.figure() """
     sns.scatterplot(data.pmra, data.pmdec, hue=p[:, n], hue_norm=(0, 1), size=p[:, n]).set(
         title=f"p(x∈C{n}) pm"
     )
     plt.figure()
-    sns.scatterplot(
+    """ sns.scatterplot(
         data.pmra, data.parallax, hue=p[:, n], hue_norm=(0, 1), size=p[:, n], 
-    ).set(title=f"p(x∈C{n}) pmra-plx")
+    ).set(title=f"p(x∈C{n}) pmra-plx") """
 
 print('coso')
     

@@ -296,7 +296,7 @@ class HKDE:
             )
         return True
 
-    def pdf(self, eval_points: np.ndarray, leave1out=False):
+    def pdf(self, eval_points: np.ndarray, leave1out=True):
         self.check_is_fitted()
         obs, dims = eval_points.shape
         if dims != self.d:
@@ -392,7 +392,67 @@ class HKDE:
                                 axes[i, j].sharey(axes[i, k])
 
         fig.colorbar(im, ax=axes.ravel().tolist())
-        return fig
+        return fig, axes
+
+
+def pair_density_plot(
+    data: np.ndarray,
+    pdf,
+    grid_resolution: int = 50,
+    figsize=(8, 6),
+    colnames=None,
+    **kwargs,
+):
+    # prepare data to plot
+    n = grid_resolution
+    linspaces = tuple(np.linspace(data.min(axis=0), data.max(axis=0), num=n).T)
+    _, dim = data.shape
+    grid = np.meshgrid(*linspaces)
+    data = np.vstack(tuple(map(np.ravel, grid))).T
+    density = pdf(data)
+    data_and_density = np.vstack((data.T, density))
+    grids = [
+        axis.reshape(*tuple([n] * dim)) for axis in data_and_density
+    ]
+    density_grid = grids[-1]
+    if colnames is None:
+        colnames = [f"d{d+1}" for d in range(dim)]
+
+    fig, axes = plt.subplots(dim, dim, figsize=figsize)
+    # fig.subplots_adjust(hspace=.5, wspace=.001)
+    for i in range(dim):
+        for j in range(dim):
+            if i == j:
+                x = linspaces[i]
+                axis_to_sum = tuple(set(list(np.arange(dim))) - {i})
+                if len(axis_to_sum):
+                    y = density_grid.sum(axis=axis_to_sum)
+                univariate_density_plot(x=x, y=y, ax=axes[i, i])
+            else:
+                x, y = np.meshgrid(linspaces[j], linspaces[i])
+                axis_to_sum = tuple(
+                    set(list(np.arange(dim))) - {i} - {j}
+                )
+                if len(axis_to_sum):
+                    z = density_grid.sum(axis=axis_to_sum)
+                else:
+                    z = density_grid
+                _, im = bivariate_density_plot(
+                    x=x, y=y, z=z, colorbar=False, ax=axes[i, j], **kwargs
+                )
+
+    for i in range(dim):
+        for j in range(dim):
+            if i != j:
+                # share x axis with univariate density of same column
+                axes[i, j].sharex(axes[j, j])
+                if j == 0 or (j == 1 and i == 0):
+                    for k in range(dim):
+                        if k != j and k != i:
+                            axes[i, j].sharey(axes[i, k])
+
+    fig.colorbar(im, ax=axes.ravel().tolist())
+    return fig, axes
 
 def bivariate_density_plot(
     x,

@@ -2,6 +2,8 @@ import numpy as np
 from rpy2.robjects import packages as rpackages
 from rpy2.robjects.packages import importr
 from rpy2.robjects import numpy2ri
+from typing import Optional, Tuple, List, Union, Callable
+
 
 utils = None
 
@@ -27,10 +29,13 @@ def pyargs2r(rsession, **kwargs):
     numpy2ri.deactivate()
     return rsession, params[:-1]
 
-def rhardload(rsession, packages: list):
+def rhardload(rsession, packages: Union[list, str]):
+    if isinstance(packages, str):
+        packages = [packages]
     for package in packages:
         if not rsession(f'"{package}" %in% (.packages())')[0]:
             if not rpackages.isinstalled(package):
+                global utils
                 if utils is None:
                     # so its done on demand just the first time
                     utils = rpackages.importr('utils')
