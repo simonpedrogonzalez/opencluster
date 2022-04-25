@@ -278,7 +278,7 @@ class TestFetcher:
         self, column, operator, value, test, correct, mock_simbad_search
     ):
         q = query_region("dummy_name", 0.5)
-        verify_result(test, lambda: q.where(column, operator, value))
+        verify_result(test, lambda: q.where((column, operator, value)))
         if test == Ok:
             assert format_query_string(q.build()) == correct
 
@@ -286,10 +286,18 @@ class TestFetcher:
         correct = "SELECT *, DISTANCE( POINT('ICRS', ra, dec), POINT('ICRS', 130.6291, -48.1) ) AS dist FROM gaiaedr3.gaia_source WHERE 1 = CONTAINS( POINT('ICRS', ra, dec), CIRCLE('ICRS', 130.6291, -48.1, 0.5)) AND column1 >= 5 AND column2 <= 17 AND column3 LIKE 'string' ORDER BY dist ASC"
         q = (
             query_region("dummy_name", 0.5)
-            .where("column1", ">=", 5)
-            .where("column2", "<=", 17)
-            .where("column3", "LIKE", "'string'")
-            .where("column1", ">=", 5)
+            .where(("column1", ">=", 5))
+            .where([("column2", "<=", 17), ("column3", "LIKE", "'string'")])
+        )
+        assert format_query_string(q.build()) == correct
+
+    def test_or_where(self, mock_simbad_search):
+        correct = "SELECT *, DISTANCE( POINT('ICRS', ra, dec), POINT('ICRS', 130.6291, -48.1) ) AS dist FROM gaiaedr3.gaia_source WHERE 1 = CONTAINS( POINT('ICRS', ra, dec), CIRCLE('ICRS', 130.6291, -48.1, 0.5)) AND column1 >= 5 AND ( column2 <= 17 ) AND ( column3 <= 3 OR column4 LIKE 'string' ) ORDER BY dist ASC"
+        q = (
+            query_region("dummy_name", 0.5)
+            .where(("column1", ">=", 5))
+            .or_where(("column2", "<=", 17))
+            .or_where([("column3", "<=", 3), ("column4", "LIKE", "'string'")])
         )
         assert format_query_string(q.build()) == correct
 
@@ -302,10 +310,9 @@ class TestFetcher:
         correct = "SELECT COUNT(*) FROM gaiaedr3.gaia_source WHERE 1 = CONTAINS( POINT('ICRS', ra, dec), CIRCLE('ICRS', 130.6291, -48.1, 0.5)) AND column1 >= 5 AND column2 <= 17 AND column3 LIKE 'string'"
         q = (
             query_region("dummy_name", 0.5)
-            .where("column1", ">=", 5)
-            .where("column2", "<=", 17)
-            .where("column3", "LIKE", "'string'")
-            .where("column1", ">=", 5)
+            .where(("column1", ">=", 5))
+            .where(("column2", "<=", 17))
+            .where(("column3", "LIKE", "'string'"))
         )
         assert format_query_string(q.build_count()) == correct
 

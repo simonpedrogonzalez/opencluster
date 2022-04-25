@@ -449,10 +449,8 @@ WHERE 1 = CONTAINS(
         if self.column_filters:
             query_filters = "".join(
                 [
-                    "\nAND {column} {operator} {condition}".format(
-                        column=column, operator=operator, condition=condition
-                    )
-                    for column, operator, condition in self.column_filters
+                    f"\n{logical_operator} {column} {comparison_operator} {value}"
+                    for logical_operator, column, comparison_operator, value in self.column_filters
                 ]
             )
             query += query_filters
