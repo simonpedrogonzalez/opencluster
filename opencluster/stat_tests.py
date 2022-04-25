@@ -3,7 +3,7 @@ import sys
 from abc import abstractmethod
 
 from astropy.stats import RipleysKEstimator
-from attr import attrs, validators, attrib
+from attrs import define, validators, field
 from matplotlib import pyplot as plt
 from scipy.spatial import ConvexHull
 from sklearn.metrics import pairwise_distances
@@ -15,6 +15,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.preprocessing import RobustScaler
+from warnings import warn
+from scipy.stats import ks_2samp
 
 sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
 from opencluster.synthetic import (
@@ -31,20 +33,31 @@ from opencluster.synthetic import (
 from opencluster.utils import combinations
 
 
-@attrs(auto_attribs=True)
+@define(auto_attribs=True)
 class TestResult:
-    value: float=None
     passed: bool=None
-    pvalue: float=None
-
 
 class StatTest:
     @abstractmethod
     def test(self, data: np.ndarray, *args, **kwargs) -> TestResult:
         pass
 
+@define(auto_attribs=True)
+class HopkinsTestResult(TestResult):
+    value: float=None
+    pvalue: float=None
 
-@attrs(auto_attribs=True)
+@define(auto_attribs=True)
+class RipleyKTestResult(TestResult):
+    value: float=None
+    radii: np.ndarray=None
+    l_function: np.ndarray=None
+
+@define(auto_attribs=True)
+class DipTestResult(TestResult):
+    pvalue: float=None
+
+@define(auto_attribs=True)
 class HopkinsTest(StatTest):
     n_samples: int = None
     metric: str = "euclidean"
@@ -150,11 +163,11 @@ class HopkinsTest(StatTest):
             passed = value >= self.threshold
         else:
             passed = pvalue <= self.pvalue_threshold
-        return TestResult(value=value, passed=passed, pvalue=pvalue)
+        return HopkinsTestResult(value=value, passed=passed, pvalue=pvalue)
 
 
-@attrs(auto_attribs=True)
-class DipTest(StatTest):
+@define(auto_attribs=True)
+class DipDistTest(StatTest):
     n_samples: int = None
     metric: str = "euclidean"
     pvalue_threshold: float = 0.05
@@ -181,27 +194,64 @@ class DipTest(StatTest):
         # plt.show()
         # print(pval)
         passed = pval < self.pvalue_threshold
-        return TestResult(pvalue=pval, passed=passed)
+        return DipTestResult(pvalue=pval, passed=passed)
 
 
-@attrs(auto_attribs=True)
+@define
 class RipleysKTest(StatTest):
     rk_estimator: RipleysKEstimator = None
+    
     scaler = None
-    pvalue_threshold: int = attrib(validator=validators.in_([.05, .01]), default=0.05)
-    csr_factors = {
-        .05: 1.45,
+    
+    ripley_factors = {
+        .05: 1.42,
         .01: 1.68,
     }
+    
+    chiu_factors = {
+        .1: 1.31,
+        .05: 1.45,
+        .01: 1.75,
+    }
 
-    def empiric_csr_rule(self, l_function, radii, area, n):
+    mode: str = field(validator=validators.in_(["ripley", "chiu", "ks"]), default="ripley")
+    
+    factor: float=None
+    
+    pvalue_threshold: float = field(default=0.05)
+
+    @pvalue_threshold.validator
+    def _check_pvalue_threshold(self, attribute, value):
+        if self.factor is None:
+            if self.mode == 'ripley' and value not in self.ripley_factors.keys():
+                raise ValueError(f"{value} is not a valid pvalue threshold for {self.mode} rule. Must be one of {self.ripley_factors.keys()}")
+            elif self.mode == 'chiu' and value not in self.chiu_factors.keys():
+                raise ValueError(f"{value} is not a valid pvalue threshold for {self.mode} rule. Must be one of {self.chiu_factors.keys()}")
+        elif value <=0 or value >=1:
+            raise ValueError(f"{value} is not a valid pvalue threshold. Must be between 0 and 1.")
+
+    def empirical_csr_rule(self, l_function, radii, area, n):
         supremum = np.max(np.abs(l_function-radii))
-        factor = self.csr_factors[self.pvalue_threshold]
-        return supremum >= factor * np.sqrt(area)/n
+        if self.factor:
+            factor = self.factor
+        elif self.mode == 'ripley':
+            factor = self.ripley_factors[self.pvalue_threshold]
+        else:
+            factor = self.chiu_factors[self.pvalue_threshold]
+        return supremum, supremum >= factor * np.sqrt(area)/n
+
+    def ks_rule(self, l_function, radii):
+        pvalue = ks_2samp(l_function, radii).pvalue
+        return pvalue, pvalue <= self.pvalue_threshold
 
     def test(
         self, data: np.ndarray, radii: np.ndarray = None, *args, **kwargs
     ):
+
+        data_unique = np.unique(data, axis=0)
+        if data_unique.shape[0] != data.shape[0]:
+            warn("There are repeated data points that cause astropy.stats.RipleysKEstimator to break, they will be removed.")
+            data = data_unique
 
         obs, dims = data.shape
         if dims != 2:
@@ -217,15 +267,17 @@ class RipleysKTest(StatTest):
 
         if radii is None:
             # considers rectangular window
+            # based on spatstat rmax.rule
             short_side = min(x_max - x_min, y_max - y_min)
             radii_max_ripley = short_side / 4
-            radii_max_large = np.sqrt(100/(np.pi*obs))
+            radii_max_large = np.sqrt(1000/(np.pi*obs))
             radii_max = min(radii_max_ripley, radii_max_large)
             step = radii_max / 128 / 4
-            radii = np.arange(0, radii_max, step)
+            radii = np.arange(0, radii_max+step, step)
 
         if self.rk_estimator is None:
-            area = ConvexHull(data).volume
+            # area = ConvexHull(points=data).volume
+            area = (x_max - x_min) * (y_max - y_min)
             self.rk_estimator = RipleysKEstimator(
                 area=area,
                 x_min=x_min,
@@ -241,12 +293,16 @@ class RipleysKTest(StatTest):
             kwargs["mode"] = "ripley"
 
         l_function = self.rk_estimator.Lfunction(data, radii, *args, **kwargs)
-
-        value = np.max(np.abs(l_function - radii))
         
-        passed = self.empiric_csr_rule(l_function, radii, area, obs)
+        if self.mode == 'ks':
+            value, passed = self.ks_rule(l_function, radii)
+        else:
+            value, passed = self.empirical_csr_rule(l_function, radii, area, obs)
 
-        return TestResult(value=value, passed=passed)
+        print(self.ks_rule(l_function, radii))
+        print(f'{value} {passed}')
+
+        return RipleyKTestResult(value=value, passed=passed, radii=radii, l_function=l_function)
 
 
 def test_dip():
@@ -620,12 +676,41 @@ def rhopkins():
     print(r_pval)
 
 def uniform_sample():
-    return BivariateUnifom(locs=(0,0), scales=(1, 1)).rvs(1000)
+    return BivariateUnifom(locs=(0, 0), scales=(1, 1)).rvs(1000)
+
+def uni_scipy():
+    x = stats.uniform(loc=0, scale=1).rvs(size=1000)
+    y = stats.uniform(loc=0, scale=1).rvs(size=1000)
+    return np.vstack((x, y)).T
+
+def uni_numpy():
+    x = np.random.uniform(low=0, high=1, size=1000)
+    y = np.random.uniform(low=0, high=1, size=1000)
+    return np.vstack((x, y)).T
+
+def uni_r():
+    from rpy2.robjects import r
+    from opencluster.rutils import rhardload, pyargs2r, rclean
+    r('x = runif(1000); y = runif(1000)')
+    return np.vstack((np.asarray(r('x')).ravel(), np.asarray(r('y')).ravel())).T
 
 def cluster_structure_sample():
-    sample = BivariateUnifom(locs=(0,0), scales=(1, 1)).rvs(100)
-    sample2 = stats.multivariate_normal(mean=(.5, .5), cov=1./500).rvs(900)
+    sample = BivariateUnifom(locs=(0, 0), scales=(1, 1)).rvs(500)
+    sample2 = stats.multivariate_normal(mean=(.5, .5), cov=1.0 / 200).rvs(500)
     return np.concatenate((sample, sample2))
+
+def harder_cluster():
+    sample = BivariateUnifom(locs=(0, 0), scales=(1, 1)).rvs(800)
+    sample2 = stats.multivariate_normal(mean=(.5, .5), cov=1.0 / 200).rvs(200)
+    return np.concatenate((sample, sample2))
+
+
+def bimodal_sample():
+    sample = BivariateUnifom(locs=(0, 0), scales=(1, 1)).rvs(500)
+    sample2 = stats.multivariate_normal(mean=(.75, .75), cov=1.0 / 200).rvs(250)
+    sample3 = stats.multivariate_normal(mean=(.25, .25), cov=1.0 / 200).rvs(250)
+    return np.concatenate((sample, sample2, sample3))
+
 
 def test_ripleys():
     us = uniform_sample()
@@ -634,20 +719,146 @@ def test_ripleys():
     clr = RipleysKTest().test(data=cl)
     prin
 
-def rripley():
+
+def test_dip2():
+    us = uniform_sample()
+    usr = DipTest().test(data=us)
+    cl = cluster_structure_sample()
+    clr = DipTest().test(data=cl)
+    print('coso')
+
+def are_unis_equal():
     from rpy2.robjects import r
     from opencluster.rutils import rhardload, pyargs2r, rclean
     rhardload(r, 'spatstat')
+    loser = []
+    for i in range(1000):
+        ur = uni_r()
+        un = uni_numpy()
+        us = uni_scipy()
+        pyargs2r(r, ur=ur, un=un, us=us)
+        r('W <- owin(c(0,1), c(0,1))')
+        r('ur <- as.ppp(as.matrix(ur), W=W); un <- as.ppp(as.matrix(un), W=W); us <- as.ppp(as.matrix(us), W=W)')
+        r('ler = Lest(ur, correction="Ripley"); ln = Lest(un, correction="Ripley"); ls = Lest(us, correction="Ripley")')
+        radir = np.asarray(r('ler$r'))
+        lfr = np.asarray(r('ler$iso'))
+        lfn = np.asarray(r('ln$iso'))
+        lfs = np.asarray(r('ls$iso'))
+        df = pd.DataFrame({'r':radir, 'fr':lfr, 'fn':lfn, 'fs':lfs})
+        rval = np.abs(lfr-radir).max()
+        nval = np.abs(lfn-radir).max()
+        sval = np.abs(lfs-radir).max()
+        names = ['r', 'n', 's']
+        loser.append(names[np.argmax([rval, nval, sval])])
+        
+    print(loser)
 
+def rripley():
+    from rpy2.robjects import r
+    from opencluster.rutils import rhardload, pyargs2r, rclean
+    from sklearn.datasets import load_iris
+    
+    iris = np.unique(load_iris().data[:, :2], axis=0)
+    x_min = np.min(iris[:, 0])
+    x_max = np.max(iris[:, 0])
+    y_min = np.min(iris[:, 1])
+    y_max = np.max(iris[:, 1])
+    
+    rhardload(r, 'spatstat')
+    pyargs2r(r, x_min=x_min, x_max=x_max, y_min=y_min, y_max=y_max)
+    pyargs2r(r, iris=iris)
+    r('W <- owin(c(x_min, x_max), c(y_min, y_max))')
+    r('iris <- as.ppp(iris, W=W)')
+    r('le = Lest(iris, correction="Ripley")')
+    radii = np.asarray(r('le$r'))
+    lf = np.asarray(r('le$iso'))
+    diff = np.abs(lf-radii)
+    value = diff.max()
+
+    print(RipleysKTest().test(iris))
     n = 1000
 
+    mine = []
+    rrr = []
+    mine2=[]
+    for i in range(100):
+        u = uniform_sample()
+        pyargs2r(r, u=u)
+        r('W <- owin(c(0,1), c(0,1))')
+        r('u <- as.ppp(as.matrix(u), W=W)')
+        r('le = Lest(u, correction="Ripley")')
+        radii = np.asarray(r('le$r'))
+        theo = np.asarray(r('le$theo'))
+        lf = np.asarray(r('le$iso'))
+        threshold = 1.45 * np.sqrt(1)/n
+        value = np.max(np.abs(lf-radii))
+        passed = value >= threshold
+        correct = not passed
+        rrr.append(correct)
+        correct_mine = not RipleysKTest().test(u).passed
+        correct_mine2 = not RipleysKTest(mode='ks').test(u).passed
+        if not correct:
+            print('stop')
+        mine.append(correct_mine)
+        mine2.append(correct_mine2)
+
+    rrr1 = []
+    mine1 = []
+    mine11= []
+    for i in range(100):
+        u = cluster_structure_sample()
+        pyargs2r(r, u=u)
+        r('W <- owin(c(0,1), c(0,1))')
+        r('u <- as.ppp(as.matrix(u), W=W)')
+        r('le = Lest(u, correction="Ripley")')
+        radii = np.asarray(r('le$r'))
+        lf = np.asarray(r('le$iso'))
+        threshold = 1.45 * np.sqrt(1)/n
+        value = np.max(np.abs(lf-radii))
+        passed = value >= threshold
+        correct = passed
+        rrr1.append(correct)
+        correct_mine1 = RipleysKTest().test(u).passed
+        correct_mine3 = RipleysKTest(mode='ks').test(u).passed
+        mine1.append(correct_mine)
+        mine11.append(correct_mine3)
+
+    mine1h = []
+    rrrh = []
+    mine2h = []
+    for i in range(100):
+        u = harder_cluster()
+        pyargs2r(r, u=u)
+        r('W <- owin(c(0,1), c(0,1))')
+        r('u <- as.ppp(as.matrix(u), W=W)')
+        r('le = Lest(u, correction="Ripley")')
+        radii = np.asarray(r('le$r'))
+        lf = np.asarray(r('le$iso'))
+        threshold = 1.45 * np.sqrt(1)/n
+        value = np.max(np.abs(lf-radii))
+        passed = value >= threshold
+        correct = passed
+        rrrh.append(correct)
+        correct_mine = RipleysKTest().test(u).passed
+        correct_mine2 = RipleysKTest(mode='ks').test(u).passed
+        if not correct_mine2:
+            print('stop')
+        mine1h.append(correct_mine)
+        mine2h.append(correct_mine2)
+
+    mineks = np.concatenate([np.array(mine2), np.array(mine11)])
+    mineer = np.concatenate([np.array(mine), np.array(mine1)])
+    rrrr = np.concatenate([np.array(rrr), np.array(rrr1)])
+    ks = len(mineks[mineks])
+    er = len(mineer[mineer])
+    rr = len(rrrr[rrrr])
     u = uniform_sample()
     pyargs2r(r, u=u)
     r('W <- owin(c(0,1), c(0,1))')
     r('u <- as.ppp(as.matrix(u), W=W)')
     r('plot(u)')
     r('dev.off()')
-    r('le = Lest(as.ppp(u, c(0,1,0,1)), correction="Ripley")')
+    r('le = Lest(u, correction="Ripley")')
     radii = np.asarray(r('le$r'))
     lf = np.asarray(r('le$iso'))
     diff = np.abs(lf-radii)
@@ -669,7 +880,7 @@ def rripley():
     r('clu <- as.ppp(as.matrix(clu), W=W)')
     r('plot(clu)')
     r('dev.off()')
-    r('le = Lest(as.ppp(as.data.frame(clu), owin(xrange=c(0,1), yrange=c(0,1))), correction="Ripley")')
+    r('le = Lest(clu, correction="Ripley")')
     radii = np.asarray(r('le$r'))
     lf = np.asarray(r('le$iso'))
     diff = np.abs(lf-radii)
@@ -683,5 +894,93 @@ def rripley():
 
     print(r_res)
 
-test_ripleys()
-# rripley()
+def rdip():
+    from rpy2.robjects import r
+    from opencluster.rutils import rhardload, pyargs2r, rclean
+    from sklearn.datasets import load_iris
+
+    rhardload(r, 'diptest')
+    us = uniform_sample()
+    cl = cluster_structure_sample()
+    bi = bimodal_sample()
+
+    sus = resample(us, n_samples=500, replace=False)
+    clss = resample(cl, n_samples=500, replace=False)
+    bis = resample(bi, n_samples=500, replace=False)
+
+    distu = np.ravel(
+        np.tril(pairwise_distances(sus))
+    )
+    distu = np.msort(distu[distu > 0])
+
+    distc = np.ravel(
+        np.tril(pairwise_distances(clss))
+    )
+    distc = np.msort(distc[distc > 0])
+
+    distb = np.ravel(
+        np.tril(pairwise_distances(bis))
+    )
+    distb = np.msort(distb[distb > 0])
+
+    pyargs2r(r,u=distu,clu=distc,bi=distb)
+    r('du = dip.test(u)')
+    r('dc = dip.test(clu)')
+    r('db = dip.test(bi)')
+    upval = np.asarray(r('du$p.value')).ravel()[0]
+    clpval = np.asarray(r('dc$p.value')).ravel()[0]
+    bipval = np.asarray(r('db$p.value')).ravel()[0]
+    ust = np.asarray(r('du$statistic')).ravel()[0]
+    clt = np.asarray(r('dc$statistic')).ravel()[0]
+    bit = np.asarray(r('db$statistic')).ravel()[0]
+    corru = upval > 0.05
+    corrc = clpval > 0.05
+    corrb = bipval <= 0.05
+    # sns.histplot(dist).set(title=str(pval))
+    # plt.show()
+    # print(pval)
+
+    np.random.seed(0)
+    usr = DipTest().test(data=us)
+    clr = DipTest().test(data=cl)
+
+#test_dip2()
+#rripley()
+#rdip()
+#are_unis_equal()
+""" pops = [uniform_sample, cluster_structure_sample, bimodal_sample]
+tests = [HopkinsTest(), RipleysKTest(), DipDistTest()]
+
+tres = []
+for t in tests:
+    for i,p in enumerate(pops):
+        np.random.seed(0)
+        tres.append({
+            'test': t.__class__.__name__,
+            'pop': i+1,
+            'passed': t.test(p()).passed,
+        })
+
+print(tres) """
+
+""" passeds = []
+for i in range(100):
+    passeds.append(RipleysKTest(pvalue_threshold=.01).test(uniform_sample()).passed)
+len(passeds[passeds])
+
+print(passeds) """
+#uht = HopkinsTest(metric="mahalanobis", n_iters=100).test(data=uniform_sample).passed
+
+def test_ripleysk_empirical_rule():
+    radii = np.array([1,2,3])
+    lf = np.array([1.01, 2.01, 3.02])
+    area = 1.5
+    n = 100
+    value1, passed1 = RipleysKTest(factor=1.65).empirical_csr_rule(radii=radii, l_function=lf, area=area, n=n)
+    assert passed1
+    assert np.isclose(value1, .02)
+    value2, passed2 = RipleysKTest(pvalue_threshold=.01).empirical_csr_rule(radii=radii, l_function=lf, area=area, n=n)
+    assert not passed2
+    assert np.isclose(value2, .02)
+
+# test_ripleysk_empirical_rule()
