@@ -332,6 +332,6 @@ class TestHKDE:
         assert np.allclose(result, pdf)
 
     def test_pdf_with_error(self, pdf_with_error_correct):
-        result = HKDE().fit(data=data, err=err, corr=corr).pdf(data)
+        result = HKDE().fit(data=data, err=err, corr=corr).pdf(data, leave1out=False)
         assert result.shape == (n,)
         assert np.allclose(result, pdf_with_error_correct)
