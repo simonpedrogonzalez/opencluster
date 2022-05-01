@@ -654,10 +654,8 @@ def case2_sample2c(fmix=.6):
     ]
     return Synthetic(field=field, clusters=clusters).rvs()
 
-""" df = case2_sample1c(fmix=.9)
-pair = df[['pmra', 'pmdec', 'parallax', 'ra', 'dec']]
-sns.pairplot(pair)
-print('coso') """
+#df = case2_sample1c(fmix=.6)
+#print('coso')
 
 
 
