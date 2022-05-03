@@ -32,20 +32,11 @@ sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
 from opencluster.plots import membership_plot, membership_3d_plot, probaplot, uniprobaplot, tsneplot
 from opencluster.plot_gauss_err import plot_kernels
 from opencluster.fetcher import load_file
-from opencluster.utils import combinations, Colnames2
+from opencluster.utils import combinations, Colnames
 from opencluster.synthetic import BivariateUnifom
 from opencluster.hkde import HKDE, PluginSelector, pair_density_plot
 from opencluster.masker import RangeMasker, DistanceMasker, CrustMasker
-
-def one_hot_encode(labels: np.ndarray):
-    # labels must be np array.
-    # Dinstinct labels must be able to be aranged into a list of consecutive int numbers
-    # e.g. [-1, 0, 1, 2] is ok, [-1, 1, 3] is not ok
-    # labels min could be 0 or -1 if noise is present
-    labels = labels + labels.min() * -1
-    one_hot = np.zeros((labels.shape[0], labels.max()+1))
-    one_hot[np.arange(labels.shape[0]), labels] = 1
-    return one_hot
+from opencluster.utils import one_hot_encode
 
 
 @define

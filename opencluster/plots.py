@@ -29,7 +29,7 @@ sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
 
 from opencluster.hkde import HKDE, PluginSelector, pair_density_plot
 from opencluster.synthetic import one_cluster_sample_small, three_clusters_sample
-from opencluster.utils import combinations, Colnames2
+from opencluster.utils import combinations, Colnames
 from opencluster.fetcher import load_file
 from opencluster.masker import RangeMasker, DistanceMasker, CrustMasker
 from opencluster.plot_gauss_err import plot_kernels
@@ -44,7 +44,7 @@ def membership_plot(
     colnames:list=None,
     palette:str='viridis',
     corner=True, # breaks colorbar
-    marker='x',
+    marker='o',
     alpha=.5,
     density_intervals=4,
     density_mode='stack',
@@ -205,6 +205,10 @@ def tsneplot(data, proba, palette='viridis', **kwargs):
     _, proba_c, _ = color_from_proba(proba, palette)
     return sns.scatterplot(projection[:,0], projection[:,1], c=proba_c, **kwargs)
 
+def plot3d_s(data, z):
+    fig, ax = plt.subplots(subplot_kw={ 'projection': '3d' })
+    ax.plot_trisurf(data[:,0], data[:,1], z, cmap='viridis', linewidth=0, antialiased=False)
+    return ax
 
 def test_probaplot():
     data = np.random.uniform(0, 1, size=(1000, 2))

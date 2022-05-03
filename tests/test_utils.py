@@ -8,7 +8,7 @@ from random import shuffle
 
 import pytest
 
-from opencluster.utils import Colnames2
+from opencluster.utils import Colnames
 
 cols = [
     "col1",
@@ -55,7 +55,7 @@ def columns_missing_corr():
 )
 def test_get_data_names(fixture_name, filter_names, correct, request):
     assert (
-        Colnames2(request.getfixturevalue(fixture_name)).get_data_names(
+        Colnames(request.getfixturevalue(fixture_name)).get_data_names(
             filter_names
         )
         == correct
@@ -77,7 +77,7 @@ def test_get_data_names(fixture_name, filter_names, correct, request):
 )
 def test_get_error_names(fixture_name, filter_names, correct, request):
     assert (
-        Colnames2(request.getfixturevalue(fixture_name)).get_error_names(
+        Colnames(request.getfixturevalue(fixture_name)).get_error_names(
             filter_names
         )
         == correct
@@ -112,7 +112,7 @@ def test_get_error_names(fixture_name, filter_names, correct, request):
 )
 def test_get_corr_names(fixture_name, filter_names, correct, request):
     assert (
-        Colnames2(request.getfixturevalue(fixture_name)).get_corr_names(
+        Colnames(request.getfixturevalue(fixture_name)).get_corr_names(
             filter_names
         )
         == correct

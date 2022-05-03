@@ -5,10 +5,10 @@ from scipy.stats._multivariate import multi_rv_frozen
 from utils import raises_exception
 from opencluster.hkde import HKDE, PluginSelector, r as rsession
 from opencluster.rutils import rhardload
-from opencluster.utils import Colnames2
+from opencluster.utils import Colnames
 
 df = Table.read("tests/data/ngc2527_small.xml").to_pandas()
-cnames = Colnames2(df.columns.to_list())
+cnames = Colnames(df.columns.to_list())
 datanames = cnames.get_data_names(["pmra", "pmdec", "parallax"])
 errornames, _ = cnames.get_error_names()
 corrnames, _ = cnames.get_corr_names()

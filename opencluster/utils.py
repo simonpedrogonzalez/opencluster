@@ -5,9 +5,19 @@ from typing import List
 from ordered_set import OrderedSet
 from typing import Optional, Tuple, List, Union, Callable, Type, Optional
 
+def one_hot_encode(labels: np.ndarray):
+    # labels must be np array.
+    # Dinstinct labels must be able to be aranged into a list of consecutive int numbers
+    # e.g. [-1, 0, 1, 2] is ok, [-1, 1, 3] is not ok
+    # labels min could be 0 or -1 if noise is present
+    labels = np.asarray(labels).astype(np.int)
+    labels = labels + labels.min() * -1
+    one_hot = np.zeros((labels.shape[0], labels.max()+1))
+    one_hot[np.arange(labels.shape[0]), labels] = 1
+    return one_hot
 
 @attrs(auto_attribs=True, init=False)
-class Colnames2:
+class Colnames:
     names: OrderedSet
 
     def __init__(self, names: List[str]):
@@ -77,48 +87,6 @@ class Colnames2:
             names = [names]
         return names
 
-
-@attrs(auto_attribs=True, init=False)
-class Colnames:
-
-    var: list
-    var_corr: list
-    var_err: list
-    var_err_corr: list
-    err: list
-    corr: list
-
-    def __init__(self, colnames: List[str]):
-        errors = [c for c in colnames if c.endswith('_error')]
-        correlations = [c for c in colnames if c.endswith('_corr')]
-        variables = [c for c in colnames if c not in errors and c not in correlations]
-        self.var = variables
-        self.err = sorted_err(variables, errors)
-        var_err = []
-        for var in variables:
-            for err in errors:
-                if var in err:
-                    var_err.append(var)
-                    break
-        self.var_err = var_err
-        
-        vc = []
-        for var in variables:
-            for corr in correlations:
-                if var in corr:
-                    vc.append(var)
-                    break
-        vc = list(dict.fromkeys(vc))
-        self.var_corr = vc
-        self.corr = sorted_corr(vc, correlations)
-
-        vce = []
-        for var in vc:
-            for err in self.err:
-                if var in err:
-                    vce.append(var)
-                    break
-        self.var_err_corr = vce
 
 def sorted_corr(variables: list, correlations: list):
     vc = variables

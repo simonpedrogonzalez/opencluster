@@ -32,33 +32,15 @@ from opencluster.utils import combinations, Colnames
 from opencluster.fetcher import load_file
 from opencluster.masker import RangeMasker, DistanceMasker, CrustMasker
 from opencluster.plot_gauss_err import plot_kernels
-
-def one_hot_encode(labels: np.ndarray):
-    # labels must be np array.
-    # Dinstinct labels must be able to be aranged into a list of consecutive int numbers
-    # e.g. [-1, 0, 1, 2] is ok, [-1, 1, 3] is not ok
-    labels = labels + labels.min() * -1
-    one_hot = np.zeros((labels.shape[0], labels.max()+1))
-    one_hot[np.arange(labels.shape[0]), labels] = 1
-    return one_hot
-
+from opencluster.plots import plot3d_s, membership_3d_plot, membership_plot, probaplot
 
 @attrs(auto_attribs=True)
-class DensityBasedMembershipEstimator(ClassifierMixin):
+class DBME:
 
-    min_cluster_size: int
-    n_iters: int = 3
+    n_iters: int = 2
     iteration_atol: float = 0.01
-    clustering_metric: str = "euclidean"
-    clustering_scaler: TransformerMixin = RobustScaler()
-    clusterer: ClusterMixin = None
     pdf_estimator: HKDE = HKDE()
-    allow_single_cluster: bool = False
-    auto_toggle_allow_single_cluster: bool = True
-    min_samples: int = None
-
-    cluster_centers: list = None
-
+    
     kde_leave1out:bool = True
     
     atol: float = 1e-2
@@ -70,7 +52,6 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
     n: int = None
     d: int = None
     n_classes: int = None
-    n_obs: float = None
 
     unique_labels: np.ndarray = None
     labels: np.ndarray = None
@@ -94,10 +75,11 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
     noise_mask: np.ndarray = None
     permanent_noise: int = 0 """
 
-    mixing_error: float = 0
+    mixing_error: float = 1
 
     iter_dists: list = attrib(factory=list)
     dist: np.ndarray = None
+    iter_test_proba:list = attrib(factory=list)
     
     diff_parametric: list= attrib(factory=list)
 
@@ -148,6 +130,12 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
     def update_diff_parametric(self, parametric):
         self.diff_parametric.append(np.abs(self.posteriors[:,1] - parametric[:,1]).mean())
 
+    def update_diff_test_proba(self, test_proba):
+        interesting = np.zeros_like(test_proba).astype(bool)
+        interesting[(test_proba > .02) & (test_proba < .98)] = True
+
+        self.iter_test_proba.append(np.abs(self.posteriors[:,1][interesting] - test_proba[interesting]).max())
+
     def is_stopping_criteria_achieved(self):
         # (ln(LLt) - ln(LLt-1)) < atol
         # or increase_percentage < ptol
@@ -196,151 +184,32 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
             self.iter_counts.append(self.counts)
             self.iter_priors.append(self.priors)
 
-    def cluster(self, data):
-        
-        # distance_matrix = pairwise_distances(data, metric=self.clustering_metric)
-
-        if self.clusterer is None:
-            allow_single_cluster = self.allow_single_cluster if self.cluster_centers is None else False
-            min_samples = self.min_samples if self.min_samples is not None else self.min_cluster_size
-            self.clusterer = HDBSCAN(
-                min_samples=min_samples,
-                min_cluster_size=self.min_cluster_size,
-                allow_single_cluster=allow_single_cluster,
-                metric=self.clustering_metric,
-                prediction_data=True,
-            )
-        self.clusterer.fit(data)
-        
-        if np.unique(self.clusterer.labels_).shape[0] == 1 and self.auto_toggle_allow_single_cluster and not allow_single_cluster:
-            min_samples = self.min_samples if self.min_samples is not None else self.min_cluster_size
-            self.clusterer = HDBSCAN(
-                min_samples=min_samples,
-                min_cluster_size=self.min_cluster_size,
-                allow_single_cluster=True,
-                metric=self.clustering_metric,
-                prediction_data=True,
-            )
-            self.clusterer.fit(data)
-
-        return self.clusterer
-
-
-    def get_posteriors_from_clustering(self):
-        one_hot_code = one_hot_encode(self.clusterer.labels_)
-        if self.clusterer.allow_single_cluster:
-            noise_proba = np.vstack((
-                one_hot_code[:,0], # probably not needed
-                self.clusterer.outlier_scores_,
-                1 - self.clusterer.probabilities_,
-                )).max(0)
-            cluster_proba = 1 - noise_proba
-        else:
-            membership = all_points_membership_vectors(self.clusterer)
-            noise_proba = np.vstack((
-                1 - membership.sum(axis=1), # probably not needed
-                one_hot_code[:,0], # probably not needed
-                self.clusterer.outlier_scores_,
-                1 - self.clusterer.probabilities_,
-                )).max(0)
-
-            cluster_proba = np.zeros((self.n, self.n_classes - 1))
-
-            # way 1: get cl_proba from crude membership vector
-            # problem: some points have haigh membership for different clusters (e.g. (c1: .3, cl2: .3, cl3: .3) )
-            # those points, instead of being between clusters, are actually inside one of them
-            # and make no sense. That significantly affects how the populations are estimated in the next phases
-            """ full_cl_proba = (membership * membership.sum(axis=1, keepdims=True) / np.tile((1 - noise_proba), (self.n_classes-1, 1)).T)
-            cluster_proba[1-noise_proba > 0] = full_cl_proba[1-noise_proba > 0] """
-
-            # way 2: hard classify among clusters, so probs look like (noise: .8, cluster1: .2, cluster2: 0)
-            # problem: when a point is really .5/.5 between 2 clusters, like in the middle point, it would be considererd
-            # 1/0
-            cluster_proba = one_hot_code[:,1:]*np.tile((1-noise_proba), (self.n_classes-1, 1)).T
-            
-        if len(cluster_proba.shape) == 1:
-            cluster_proba = np.atleast_2d(cluster_proba).T
-            
-        posteriors = np.zeros((self.n, self.n_classes))
-        posteriors[:,0] = noise_proba
-        posteriors[:,1:] = cluster_proba
-        assert np.allclose(posteriors.sum(axis=1), 1)
-        return posteriors
-
-    def center_based_cluster_selection(self, data, labels, input_centers):
-        
-        # compares input cluster centers with obtained cluster centers
-        # if input cluster centers are less than obtained, then select
-        # onbtained clusters that match input centers the best
-        
-        cluster_labels = self.unique_labels[self.unique_labels != -1]
-        cluster_centers = np.array([
-            [
-                sigma_clipped_stats(
-                    data[labels == label][:,i],
-                    cenfunc="median",
-                    stdfunc="mad_std",
-                    maxiters=None,
-                    sigma=1,
-                    )[1] for i in range(self.d)
-            ] for label in cluster_labels
-        ])
-
-        # there are obtained clusters to label as noise
-        # we should select those that match input centers the best
-
-        short = input_centers
-        long = cluster_centers
-        
-        center_distances = pairwise_distances(X=short, Y=long)
-        idx_columns = np.array(list(permutations(np.arange(long.shape[0]), short.shape[0])))
-        idx_rows = np.arange(short.shape[0])
-
-
-        if short.shape[0] == 1:
-            distance_sum_per_solution = center_distances.ravel()
-        else:
-            dist_idcs = tuple([tuple(map(tuple, x)) for x in np.stack((np.tile(idx_rows, (idx_columns.shape[0], 1)), idx_columns), axis=1)])
-            distance_sum_per_solution = np.array([center_distances[dist_idcs[i]] for i in range(len(dist_idcs))]).sum(axis=1)
-            
-        best_solution = idx_columns[distance_sum_per_solution == distance_sum_per_solution.min()].ravel()
-
-        # lets delete some clusters
-        # shot is self.class_centers
-        # long is class_centers
-        # labels are in class_centers order
-        # i need to keep labels that are in best_solution
-        # the rest should be noise
-        
-        new_labels = np.copy(labels)
-        new_labels[~np.isin(labels, best_solution)] = -1
-        
-        posteriors = self.get_posteriors_from_clustering()
-
-        noise_proba = posteriors[:,tuple([0] + list((cluster_labels + 1)[~np.isin(cluster_labels, best_solution)]))].sum(axis=1)
-        cluster_proba = posteriors[:, tuple((cluster_labels + 1)[np.isin(cluster_labels, best_solution)])]
-
-        new_n_classes = short.shape[0] + 1
-
-        # create new posteriors array
-        new_posteriors = np.zeros((self.n, new_n_classes))
-        new_posteriors[:,0] = noise_proba
-        new_posteriors[:,1:] = cluster_proba
-
-        assert np.allclose(new_posteriors.sum(axis=1), 1)
-
-        # reorder kept labels
-        for i, label in enumerate(best_solution):
-            new_labels[new_labels == label] = i
-
-        return new_labels, new_posteriors
-
     def get_posteriors(self, densities):
         # probability calculation
         # P(Ci|x) = Di(x) * P(Ci) / sumj(Dj(x) * P(Cj))
         total_density = (densities * self.counts).sum(axis=1, keepdims=True).repeat(self.n_classes, axis=1)
         posteriors = densities*self.counts / total_density
         return posteriors
+
+    def get_posteriors2(self, densities):
+        # probability calculation
+        # P(Ci|x) = Di(x) / sumj(Dj(x))
+        total_density = densities.sum(axis=1, keepdims=True).repeat(self.n_classes, axis=1)
+        posteriors = densities / total_density
+        return posteriors
+
+    def get_posteriors3(self, densities):
+        # probability calculation
+        # P(Ci|x) = Di(x) / sumj(Dj(x))
+        total_density = densities.sum(axis=1, keepdims=True).repeat(self.n_classes, axis=1)
+        posteriors = densities / total_density
+
+        yfie1 = HKDE().fit(self.data, weights=posteriors[:,0]).pdf(self.data)
+        yclu = 1 - yfie1
+        new_posteriors = np.concatenate((yfie1.reshape(-1,1), yclu.reshape(-1,1)), axis=1)
+
+
+        return new_posteriors
 
     def get_densities(self, data: np.ndarray, err, corr, weights: np.ndarray):
         densities = np.zeros((self.n, self.n_classes))
@@ -368,52 +237,34 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
         
         return densities
 
-    def fit_predict(
+    def fit(
         self,
         data: np.ndarray,
+        init_proba: np.ndarray,
         err: np.ndarray = None,
         corr: Union[np.ndarray, str] = None,
+        test_proba = None,
     ):
 
         self.n, self.d = data.shape
         self.data = data
-
-        if self.clustering_scaler is not None:
-            cl_data = self.clustering_scaler.fit(data).transform(data)
-        else:
-            cl_data = data
-
-        self.cluster(cl_data)
-
-        self.labels = self.clusterer.labels_
-        self.unique_labels = np.sort(np.unique(self.labels))
-        self.n_classes = self.unique_labels.shape[0]
+        self.labels = np.argmax(init_proba, axis=1)-1
+        self.unique_labels = np.unique(self.labels)
+        self.n_classes = len(self.unique_labels)
+        
+        self.posteriors = init_proba
+        self.update_class_mixtures(posteriors=init_proba)
 
         # case no clusters found
         if self.n_classes == 1:
-            self.posteriors = one_hot_encode(self.labels)
-            self.update_class_mixtures(self.posteriors)
             # there are no populations to fit
             return self
 
-        # case cluster selection required
-        if not self.clusterer.allow_single_cluster and self.cluster_centers is not None and self.cluster_centers.shape[0] < self.n_classes - 1:
-            if self.clustering_scaler is not None:
-                input_centers = self.clustering_scaler.transform(self.cluster_centers)
-            else:
-                input_centers = self.cluster_centers
-            self.labels, self.posteriors = self.center_based_cluster_selection(cl_data, self.labels, input_centers)
-            self.unique_labels = np.sort(np.unique(self.labels))
-            self.n_classes = self.unique_labels.shape[0]
-        else:
-            self.posteriors = self.get_posteriors_from_clustering()
-
-        self.update_class_mixtures(self.posteriors)
-
         # p_parametric, mix = parametric(data, self.labels, self.priors)
-        f = lambda x: mix.predict_proba(x)[:,0]
+        #f = lambda x: mix.predict_proba(x)[:,0]
         # testing
-        self.update_dist(self.posteriors)
+        #self.update_dist(self.posteriors)
+        #self.update_diff_test_proba(test_proba)
         # end testing
         
         #self.update_diff_parametric(p_parametric)
@@ -426,16 +277,22 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
             """ if self.noise_mask is not None:
                 weights[self.noise_mask] = np.array([1.] + [0.]*(self.n_classes - 1)) """
             densities = self.get_densities(data, err, corr, weights)
+            #self.posteriors = self.get_posteriors(densities)
             self.posteriors = self.get_posteriors(densities)
             self.update_class_mixtures(self.posteriors)
-            self.update_log_likelihood(densities)
+            #self.update_log_likelihood(densities)
             # testing
-            self.update_dist(self.posteriors)
-            grid = self.membership_plot()
-            lll = self.posteriors[:,1] > .5
+            #self.update_dist(self.posteriors)
+            #self.update_diff_test_proba(test_proba)
+            #grid = self.membership_plot()
+            #lll = self.posteriors[:,1] > .5
             #mem_plot_kernels(index=1, dbme=self, ax=grid.axes[1,0], data=data, n=10000, labels=lll)
-            print(f'iter {i}')
-            plt.show()
+            #print(f'iter {i}')
+            #plt.show()
+            #plot3d_s(self.data, self.posteriors[:,1])
+            #plt.show()
+            #self.probaplot()
+            #plt.show()
 
             #self.update_diff_parametric(p_parametric)
             """ nn = self.n_obs
@@ -461,7 +318,7 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
             self.n_obs = nn
              """
             # end testing
-            self.is_stopping_criteria_achieved()
+            #self.is_stopping_criteria_achieved()
                 # break
             # testing
             # self.membership_3d_plot(marker='o', palette='viridis_r', marker_size=100**(self.posteriors[:,1]))
@@ -492,6 +349,7 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
         df['ll_diff'] = np.array([np.nan] + self.iter_log_likelihood_diff)
         df['label_diff'] = np.array([np.nan] + self.iter_label_diff)
 
+
         sns.lineplot(ax=axes[1], x=df.t, y=df['log_likelihood'])
 
         sns.lineplot(ax=axes[2], x=df.t, y=df['ll_%'])
@@ -515,14 +373,14 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
         """ df['diff_parametric'] = np.array(self.diff_parametric)
         sns.lineplot(ax=axes[6], x=df.t, y=df.diff_parametric) """
         # end test
+        df['proba_diff'] = self.iter_test_proba
+        sns.lineplot(ax=axes[6], x=df.t, y=df.proba_diff)
 
         return fig, axes
 
     def membership_plot(self, label=0, **kwargs):
         return membership_plot(self.data, self.posteriors[:,label+1], **kwargs)
 
-    def clustering_plot(self, label=0, **kwargs):
-        return membership_plot(self.data, self.clusterer.labels_ + 1, self.clusterer.labels_ + 1, **kwargs)
 
     def class_plot(self, **kwargs):
         return membership_plot(self.data, self.labels+1, self.labels, **kwargs)
@@ -530,102 +388,8 @@ class DensityBasedMembershipEstimator(ClassifierMixin):
     def membership_3d_plot(self, label=0, **kwargs):
         return membership_3d_plot(self.data, self.posteriors[:, label+1], **kwargs)
 
-    def clustering_3d_plot(self, label=0, **kwargs):
-        return membership_3d_plot(self.data, self.clusterer.labels_ + 1, self.clusterer.labels_ + 1, **kwargs)
-
-def membership_3d_plot(
-    data: Union[np.ndarray, pd.DataFrame],
-    posteriors,
-    colnames:list=None,
-    var_index=(1,2,3),
-    palette: str='viridis',
-    alpha=.5,
-    marker='x',
-    marker_size=40,
-    ):
-    fig, ax = plt.subplots(subplot_kw={ 'projection': '3d' })
-    cmap = ListedColormap(sns.color_palette(palette, 256).as_hex())
-    if len(var_index) != 3:
-        raise ValueError()
-    var_index = np.array(var_index) - 1
-    ax.scatter3D(data[:,var_index[0]], data[:,var_index[1]], data[:,var_index[2]], s=marker_size, marker=marker, cmap=cmap, c=posteriors, alpha=alpha)
-    return fig, ax   
-
-    
-
-#TODO: fix colors problem
-def membership_plot(
-    data:Union[np.ndarray, pd.DataFrame],
-    posteriors,
-    labels=None,
-    colnames:list=None,
-    palette:str='viridis',
-    corner=True, # breaks colorbar
-    marker='x',
-    alpha=.5,
-    density_intervals=4,
-    density_mode='stack',
-    size=None,
-    ):
-
-    sns.set_style('darkgrid')
-    if isinstance(data, np.ndarray):
-        obs, dims = data.shape
-        data = pd.DataFrame(data)
-        if colnames is not None:
-            data.columns = colnames
-        else:
-            data.columns = [f"var {i+1}" for i in range(dims)]
-    
-    if labels is None and density_intervals is not None:
-        if isinstance(density_intervals, int):
-            density_intervals = np.linspace(0, 1, density_intervals+1)
-        labels = pd.cut(x=posteriors, bins=density_intervals, include_lowest=True)
-        ticks = np.array([interval.right for interval in labels.categories.values])
-        if density_mode == 'stack':
-            # reverse order in which stacked graf will appear
-            hue_order = np.flip(labels.categories.astype(str))
-            labels = labels.astype(str)
-            if palette.endswith('_r'):
-                diag_palette = palette.strip('_r')
-            else:
-                diag_palette = palette + '_r'
-            diag_kws = {
-                "hue": labels,
-                "hue_order": hue_order,
-                "multiple": density_mode,
-                'palette': sns.color_palette(diag_palette, n_colors=len(hue_order)),
-                'linewidth': 0,
-                'cut': 0,
-                }
-        else:
-            diag_kws = { "hue": labels, "multiple": density_mode, 'palette': palette, 'linewidth': 0, 'cut': 0 }
-    else:
-        ticks = np.arange(0, 1, .1)
-        diag_kws = { "hue": labels, "multiple": density_mode, 'palette': palette, 'linewidth': 0, 'cut': 0 }
-
-    cmap = ListedColormap(sns.color_palette(palette).as_hex())
-    sm = plt.cm.ScalarMappable(cmap=sns.color_palette(palette, as_cmap=True))
-    sm.set_array([])
-
-    plot_kws={ "hue": posteriors, "hue_norm": (0, 1), "marker": marker, 'alpha': alpha, 'palette': palette }
-
-    if size is not None:
-        plot_kws['size'] = size
-    
-    grid = sns.pairplot(
-        data,
-        plot_kws=plot_kws,
-        diag_kind="kde",
-        diag_kws=diag_kws,
-    )
-    plt.colorbar(sm, ax=grid.axes, ticks=ticks)
-    # its done this way to avoid map_lower error when having different hues for diag and non diag elements
-    if corner:
-        for i in np.vstack(np.triu_indices(data.shape[1])).T:
-            grid.axes[i[0], i[1]].set_visible(False)
-    return grid
-
+    def probaplot(self, **kwargs):
+        return probaplot(data=self.data, proba=self.posteriors, labels=self.labels, **kwargs)
 
 def parametric(data, labels, priors):
     import pomegranate as pg
@@ -787,20 +551,47 @@ def test_cluster_selection():
 # test_cluster_selection()
 # test_simul()
 from opencluster.synthetic import case2_sample0c, case2_sample1c, case2_sample2c
+from opencluster.shdbscan import SHDBSCAN, one_hot_encode
 
-def test_1c_asc():
+def test_1c_pm():
     fmix=.9
     clu_size=int(1000*(1-fmix))
     df = case2_sample1c(fmix)
+    test_proba = df["p_pm_cluster1"].to_numpy()
     
-    data = df[['pmra', 'pmdec']].to_numpy()
-    dbme = DensityBasedMembershipEstimator(
-        allow_single_cluster=True,
-        min_cluster_size=clu_size,
-        n_iters=20,
-        )
-    dbme.fit_predict(data)
-    
-    assert np.allclose(dbme.posteriors, df.p_pm_field.to_numpy())
+    test_labels = np.zeros_like(test_proba)
+    test_labels[test_proba > .5] = 1
+    test_labels = test_labels - 1
+    init_proba = one_hot_encode(test_labels)
 
-# test_1c_asc()
+    data = df[['pmra', 'pmdec']].to_numpy()
+
+    #clu = SHDBSCAN(min_cluster_size=clu_size, auto_allow_single_cluster=True, outlier_quantile=.9).fit(data)
+    #init_proba = clu.proba
+    
+    dbme = DBME(n_iters=20).fit(data, init_proba, test_proba=test_proba)
+
+    print('coso')
+
+def test_1c_space():
+    fmix=.9
+    clu_size=int(1000*(1-fmix))
+    df = case2_sample1c(fmix)
+    test_proba = df["p_pm_cluster1"].to_numpy()
+    all_test_proba = df[["p_pm_field", "p_pm_cluster1"]].to_numpy()
+    
+    test_labels = np.zeros_like(test_proba)
+    test_labels[test_proba > .5] = 1
+    test_labels = test_labels - 1
+    init_proba = one_hot_encode(test_labels)
+
+    data = df[['pmra', 'pmdec']].to_numpy()
+
+    #clu = SHDBSCAN(min_cluster_size=clu_size, auto_allow_single_cluster=True, outlier_quantile=.9).fit(data)
+    #init_proba = clu.proba
+    
+    dbme = DBME(n_iters=20).fit(data, init_proba, test_proba=test_proba)
+
+    print('coso')
+
+# test_1c_space()

@@ -38,7 +38,7 @@ from opencluster.hkde import HKDE
 from opencluster.masker import RangeMasker
 from opencluster.membership2 import DensityBasedMembershipEstimator
 from opencluster.synthetic import three_clusters_sample
-from opencluster.utils import Colnames2
+from opencluster.utils import Colnames
 from astropy.table.table import Table
 
 
@@ -64,7 +64,7 @@ class PMPlxPipeline(Pipeline):
         df["idx"] = np.arange(obs)
         
 
-        colnames = Colnames2(df.columns)
+        colnames = Colnames(df.columns)
         if not len(colnames.get_data_names('log10_parallax')):
             df['log10_parallax'] = np.log10(df['parallax'].to_numpy())
         detection_cols = ["pmra", "pmdec", "log10_parallax"]

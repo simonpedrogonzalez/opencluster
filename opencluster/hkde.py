@@ -28,7 +28,7 @@ from numbers import Number
 
 sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
 from opencluster.rutils import pyargs2r, rclean, rhardload
-from opencluster.utils import Colnames2
+from opencluster.utils import Colnames
 from opencluster.synthetic import (
     Cluster,
     Field,
@@ -740,7 +740,7 @@ def test_kdeplot():
 
 def test_new_way():
     df = Table.read("tests/data/ngc2527_small.xml").to_pandas()
-    cnames = Colnames2(df.columns.to_list())
+    cnames = Colnames(df.columns.to_list())
     datanames = cnames.get_data_names(["pmra", "pmdec", "parallax"])
     errornames, _ = cnames.get_error_names()
     corrnames, _ = cnames.get_corr_names()
