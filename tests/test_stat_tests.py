@@ -75,7 +75,7 @@ def test_dip_uniform(uniform_sample):
     assert not DipDistTest().test(uniform_sample).passed
 
 def test_dip_one_cluster(one_cluster_sample):
-    assert not DipDistTest().test(one_cluster_sample).passed
+    assert DipDistTest(n_samples=300).test(one_cluster_sample).passed
 
 def test_dip_two_clusters(two_clusters_sample):
     assert DipDistTest().test(data=two_clusters_sample).passed

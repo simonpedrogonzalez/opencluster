@@ -17,6 +17,9 @@ sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
 from opencluster.detection import find_clusters
 from opencluster.masker import RangeMasker
 from opencluster.synthetic import three_clusters_sample
+from decimal import Decimal
+from opencluster.synthetic import polar_to_cartesian, UniformSphere, Cluster, Field, Synthetic
+from scipy.stats import multivariate_normal
 
 
 def get_default_mask(dim: int):
@@ -45,6 +48,7 @@ def convolve(
 # unused
 # TODO: should use mask, e.g.: not include center pixel.
 # idea: use generic_filter footprint?
+# TODO: remove
 def var_filter(data, mask=None, *args, **kwargs):
     if mask is not None:
         kwargs["footprint"] = mask != 0
@@ -57,7 +61,7 @@ def var_filter(data, mask=None, *args, **kwargs):
     )
 
 
-# unused
+# unused, only keep for testing
 # TODO: use mask, should not include center pixel faster
 def std_filter(data, mask=None, *args, **kwargs):
     if mask is not None:
@@ -71,9 +75,9 @@ def std_filter(data, mask=None, *args, **kwargs):
     )
 
 
-def fast_std_filter(data, mask):
-    u_x2 = convolve(data, mask=mask)
-    ux_2 = convolve(data * data, mask=mask)
+def fast_std_filter(data, mask, **kwargs):
+    u_x2 = convolve(data, mask=mask, **kwargs)
+    ux_2 = convolve(data * data, mask=mask, **kwargs)
     return (ux_2 - u_x2 * u_x2) ** 0.5
 
 
@@ -99,8 +103,8 @@ def get_histogram_bins(
     # calculate the margins which are added to the range in order
     # to fit a number of bins that is integer
     margins = [
-        (bin_shape[i] - (data[:, i].max() - data[:, i].min()) % bin_shape[i])
-        / 2
+        (bin_shape[i] - float(Decimal(float(data[:, i].max() - data[:, i].min())) % Decimal(float(bin_shape[i]))))
+        / 2.
         for i in range(dim)
     ]
     # add base margins
@@ -138,16 +142,18 @@ def nyquist_offsets(bin_shape: list):
 @attrs(auto_attribs=True)
 class Peak:
     index: np.ndarray
-    significance: Union[float, int]
-    count: Union[float, int]
-    center: np.ndarray
-    sigma: Optional[np.ndarray]
+    significance: Union[float, int]=None
+    count: Union[float, int] = None
+    center: np.ndarray = None
+    sigma: np.ndarray = None
 
     def is_in_neighbourhood(self, b):
         return not np.any(np.abs(self.index - b.index) > 1)
 
 
 def get_most_significant_peaks(peaks: list):
+    if not len(peaks):
+        return []
     bests = [peaks[0]]
     peaks = peaks[1:]
     while len(peaks) > 0:
@@ -201,7 +207,7 @@ class CountPeakDetector(PeakDetector):
             for j in range(2):
                 while True:
                     if ranges[i][0] >= ranges[i][1]:
-                        raise Exception(
+                        raise ValueError(
                             """No bin passed minimum density check.
                             Check min_count parameter."""
                         )
@@ -227,7 +233,7 @@ class CountPeakDetector(PeakDetector):
         # extend ranges half mask shape in each direction so data that belongs to
         # an invalid bin can contribute in a border valid bin when the mask is applied
         mask_shape = np.array(self.mask.shape)
-        half_mask_shape = np.ceil(mask_shape / 2)
+        half_mask_shape = np.floor(mask_shape / 2)
         ranges[:, 0] = ranges[:, 0] - half_mask_shape * self.bin_shape
         ranges[:, 1] = ranges[:, 1] + half_mask_shape * self.bin_shape
 
@@ -292,10 +298,19 @@ class CountPeakDetector(PeakDetector):
             smoothed = convolve(hist, mask=mask)
             sharp = hist - smoothed
             std = fast_std_filter(hist, mask=mask)
-            # err_hist = sqrt(hist)
-            # err_smoothed = std(smoothed)
-            # err_sharp = sqrt(err_hist^2 + err_smoothed^2)
-            # normalized = sharp / err_sharp
+            # err_hist = sqrt(hist) 
+            # because:
+            # estimate of std: std[vhat] = sqrt(vhat) = sqrt(n)
+            # error bars are given by the square root
+            # of the number of entries in each bin of the histogram
+            # err_smoothed = std(smoothed) = sqrt(smoothed)
+            # sharp = hist - smoothed so
+            # err_sharp = sqrt(err_hist^2 + err_smoothed^2 - ...)
+            # because:
+            # std[a - b] = sqrt(varianza(a) + varianza(b) - 2*covarianza(a,b))
+            # according to: https://en.wikipedia.org/wiki/Propagation_of_uncertainty
+            # covarianza(a,b) = varianza(a) * varianza(b) * corrcoef(a,b)
+            # as normalized = sharp / err_sharp
             # +1 is added to avoid zero division errors
             normalized = sharp / np.sqrt(hist + std**2 + 1)
 
@@ -446,5 +461,71 @@ def test_detection():
     print(res.peaks[0])
     print("coso")
 
+#data = np.vstack((np.arange(0, 1.1, 0.1), np.arange(0, 1.1, 0.1))).T
+#bin_shape = [.5, .5]
+#offsets = [-0.2, 0.2]
+#bins, ranges = get_histogram_bins(data, bin_shape, offsets)
+#assert np.equal(ranges, np.array([[-.05, .05], [-.05, .05]])) 
 
 # test_detection()
+#rang1 = np.arange(1, 10, 1)
+#rang2 = np.array([4, 5, 6]*4)
+#var1 = np.concatenate((rang1, rang2))
+#var2 = np.concatenate((np.flip(rang2), np.flip(rang1)))
+# data will result in a diagonal histogram
+# with more density in 3 center elements
+##data = np.vstack((var1, var2)).T
+#bin_shape = [1, 1]
+#bins, _ = get_histogram_bins(data, bin_shape)
+#assert np.allclose(bins, np.array([9,9]))
+
+#mask = np.ones((3,3))/9
+# data2 has some points deleted, so the histogram
+# generated will have just the center region
+# and enough surrounding bins to use the mask given 
+#data2 = CountPeakDetector(bin_shape=[1,1], mask=mask, min_count=5).trim_low_density_regions(data)
+
+#bins, _ = get_histogram_bins(data2, bin_shape)
+#assert np.allclose(bins, np.array([5,5]))
+
+#data3 = CountPeakDetector(bin_shape=[1,1], mask=mask, min_count=6).trim_low_density_regions(data)
+
+
+#print(no_outliers)
+
+def three_clusters_sample():
+    field_size=int(1e4)
+    cluster_size=int(1e2)
+    field = Field(
+    pm=multivariate_normal(mean=(0., 0.), cov=20),
+    space=UniformSphere(center=polar_to_cartesian((120.5, -27.5, 5)),
+    radius=100), star_count=field_size)
+    clusters = [
+        Cluster(
+            space=multivariate_normal(mean=polar_to_cartesian([120.7, -28.5, 5]), cov=.5),
+            pm=multivariate_normal(mean=(.5, 0), cov=1./10),
+            star_count=cluster_size
+        ),
+        Cluster(
+            space=multivariate_normal(mean=polar_to_cartesian([120.8, -28.6, 5]), cov=.5),
+            pm=multivariate_normal(mean=(4.5, 4), cov=1./10),
+            star_count=cluster_size
+        ),
+        Cluster(
+            space=multivariate_normal(mean=polar_to_cartesian([120.9, -28.7, 5]), cov=.5),
+            pm=multivariate_normal(mean=(7.5, 7), cov=1./10),
+            star_count=cluster_size
+        ),
+    ]
+    df = Synthetic(field=field, clusters=clusters).rvs()
+    return df
+
+""" df = three_clusters_sample()[['pmra', 'pmdec', 'log10_parallax']]
+data = df.values
+result = CountPeakDetector(bin_shape=[.5, .5, .05], min_count=5, min_dif=20).detect(data, heatmaps=True)
+center1 = (.5, 0, np.log10(5))
+center2 = (4.5, 4, np.log10(5))
+center3 = (7.5, 7, np.log10(5))
+# test that the peak detector can detect peaks
+# in a simple case
+print('coso') """

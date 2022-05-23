@@ -16,7 +16,7 @@ import pandas as pd
 import seaborn as sns
 from sklearn.preprocessing import RobustScaler
 from warnings import warn
-from scipy.stats import ks_2samp
+from scipy.stats import ks_2samp, multivariate_normal
 
 sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
 from opencluster.synthetic import (
@@ -54,8 +54,9 @@ class RipleyKTestResult(TestResult):
     l_function: np.ndarray=None
 
 @define(auto_attribs=True)
-class DipTestResult(TestResult):
+class DipDistTestResult(TestResult):
     pvalue: float=None
+    dist: np.ndarray = None
 
 @define(auto_attribs=True)
 class HopkinsTest(StatTest):
@@ -194,7 +195,7 @@ class DipDistTest(StatTest):
         # plt.show()
         # print(pval)
         passed = pval < self.pvalue_threshold
-        return DipTestResult(pvalue=pval, passed=passed)
+        return DipDistTestResult(pvalue=pval, passed=passed, dist=dist)
 
 
 @define
@@ -983,4 +984,50 @@ def test_ripleysk_empirical_rule():
     assert not passed2
     assert np.isclose(value2, .02)
 
-# test_ripleysk_empirical_rule()
+def uniform_sample():
+    return BivariateUnifom(locs=(0, 0), scales=(1, 1)).rvs(1000)
+
+def one_cluster_sample():
+    sample = BivariateUnifom(locs=(0, 0), scales=(1, 1)).rvs(500)
+    sample2 = multivariate_normal(mean=(.5, .5), cov=1.0 / 200).rvs(500)
+    return np.concatenate((sample, sample2))
+
+def two_clusters_sample():
+    sample = BivariateUnifom(locs=(0, 0), scales=(1, 1)).rvs(500)
+    sample2 = multivariate_normal(mean=(.75, .75), cov=1.0 / 200).rvs(250)
+    sample3 = multivariate_normal(mean=(.25, .25), cov=1.0 / 200).rvs(250)
+    return np.concatenate((sample, sample2, sample3))
+
+def test_dip_uniform():
+    assert not DipDistTest().test(uniform_sample()).passed
+
+def test_dip_one_cluster():
+    assert not DipDistTest().test(one_cluster_sample()).passed
+
+def test_dip_two_clusters():
+    assert DipDistTest().test(data=two_clusters_sample()).passed
+
+def plot(tr):
+    palette = sns.color_palette('flare', 20)
+    ran_color = palette[np.random.choice(len(palette))]
+    return sns.lineplot(np.arange(0,len(tr.dist)), tr.dist,color=ran_color)
+
+""" for i in range(10):
+    np.random.seed(i)
+    u = uniform_sample()
+    np.random.seed(i)
+    c = one_cluster_sample()
+    np.random.seed(i)
+    b = two_clusters_sample()
+    ur = DipDistTest(n_samples=200).test(u)
+    cr = DipDistTest(n_samples=200).test(c)
+    br = DipDistTest(n_samples=200).test(b)
+
+    if not ur.passed and cr.passed and br.passed:
+        print('Correct:', i)
+    else:
+        print('Incorrect:', i)
+        print(ur.passed, cr.passed, br.passed)
+        print('coso')
+
+print('coso') """
