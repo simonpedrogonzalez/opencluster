@@ -27,12 +27,12 @@ from scipy.stats import binned_statistic
 
 sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
 
-from opencluster.hkde import HKDE, PluginSelector, pair_density_plot
-from opencluster.synthetic import one_cluster_sample_small, three_clusters_sample
-from opencluster.utils import combinations, Colnames
-from opencluster.fetcher import load_file
-from opencluster.masker import RangeMasker, DistanceMasker, CrustMasker
-from opencluster.plot_gauss_err import plot_kernels
+#from opencluster.hkde import HKDE, PluginSelector, pair_density_plot
+#from opencluster.synthetic import one_cluster_sample_small, three_clusters_sample
+#from opencluster.utils import combinations, Colnames
+#from opencluster.fetcher import load_file
+#from opencluster.masker import RangeMasker, DistanceMasker, CrustMasker
+#from opencluster.plot_gauss_err import plot_kernels
 
 
 

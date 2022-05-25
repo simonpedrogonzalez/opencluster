@@ -390,7 +390,7 @@ class CountPeakDetector(PeakDetector):
 
         if heatmaps:
             # it will return heatmap corresponding to last offset only
-            res.heatmaps = create_heatmaps(hist, edges, self.bin_shape, clusters_idx)
+            res.heatmaps = create_heatmaps(hist, edges, self.bin_shape, np.array([peak.index for peak in global_peaks]).T)
         return res
 
 

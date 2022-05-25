@@ -202,7 +202,7 @@ class DipDistTest(StatTest):
 class RipleysKTest(StatTest):
     rk_estimator: RipleysKEstimator = None
     
-    scaler = None
+    scaler = MinMaxScaler()
     
     ripley_factors = {
         .05: 1.42,

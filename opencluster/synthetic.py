@@ -482,7 +482,7 @@ class Synthetic:
             xyz = data[['x', 'y', 'z']].to_numpy()
             data['ra'], data['dec'], data['parallax'] = cartesian_to_polar(xyz).T
             data['log10_parallax'] = np.log10(data['parallax'])
-            # data.drop(['x', 'y', 'z'], inplace=True, axis=1)
+            data.drop(['x', 'y', 'z'], inplace=True, axis=1)
         return data
 
 def one_cluster_sample(field_size=int(1e4)):
@@ -500,35 +500,74 @@ def one_cluster_sample(field_size=int(1e4)):
     df = Synthetic(field=field, clusters=clusters).rvs()
     return df
 
-def three_clusters_sample(field_size=int(1e4), cluster_size=int(2e2)):
+def three_clusters_sample():
+    field_size=int(1e4)
+    cluster_size=int(2e2)
     field = Field(
     pm=stats.multivariate_normal(mean=(0., 0.), cov=20),
     space=UniformSphere(center=polar_to_cartesian((120.5, -27.5, 5)),
-    radius=10), star_count=field_size)
+    radius=20), star_count=field_size)
     clusters = [
         Cluster(
             space=stats.multivariate_normal(mean=polar_to_cartesian([120.7, -28.5, 5]), cov=.5),
-            pm=stats.multivariate_normal(mean=(.5, 0), cov=1./35),
+            pm=stats.multivariate_normal(mean=(.5, 0), cov=1./10),
             star_count=cluster_size
         ),
         Cluster(
             space=stats.multivariate_normal(mean=polar_to_cartesian([120.8, -28.6, 5]), cov=.5),
-            pm=stats.multivariate_normal(mean=(4.5, 4), cov=1./35),
+            pm=stats.multivariate_normal(mean=(4.5, 4), cov=1./10),
             star_count=cluster_size
         ),
         Cluster(
             space=stats.multivariate_normal(mean=polar_to_cartesian([120.9, -28.7, 5]), cov=.5),
-            pm=stats.multivariate_normal(mean=(7.5, 7), cov=1./35),
+            pm=stats.multivariate_normal(mean=(7.5, 7), cov=1./10),
             star_count=cluster_size
-        ),
-        Cluster(
-            space=stats.multivariate_normal(mean=polar_to_cartesian([120.9, -28.7, 5]), cov=.5),
-            pm=stats.multivariate_normal(mean=(15.5, 15), cov=1./35),
-            star_count=1
         ),
     ]
     df = Synthetic(field=field, clusters=clusters).rvs()
     return df
+
+
+def sample3c(fmix=.9):
+    field_size=int(1e4)
+    cluster_size=int(2e2)
+    
+    field = Field(
+        pm=stats.multivariate_normal(mean=(0., 0.), cov=20),
+        space=UniformFrustum(locs=(118, -31, 1.2), scales=(6, 6, 1)),
+        star_count=field_size,
+        )
+    clusters = [
+        Cluster(
+            pm=stats.multivariate_normal(mean=(.5, 0), cov=1./10),
+            space=stats.multivariate_normal(mean=polar_to_cartesian([120, -28, 1.3]), cov=.7),
+            star_count=cluster_size
+        ),
+        Cluster(
+            pm=stats.multivariate_normal(mean=(4.5, 4), cov=1./10),
+            space=stats.multivariate_normal(mean=polar_to_cartesian([121, -27, 1.7]), cov=.7),
+            star_count=cluster_size
+        ),
+        Cluster(
+            pm=stats.multivariate_normal(mean=(7.5, 7), cov=1./10),
+            space=stats.multivariate_normal(mean=polar_to_cartesian([122.5, -25.5, 2.1]), cov=.7),
+            star_count=cluster_size
+        ),
+    ]
+    return Synthetic(field=field, clusters=clusters).rvs()
+
+""" df = sample3c()
+#df_plot = df[['ra', 'dec', 'parallax', 'pmra', 'pmdec']]
+#sns.pairplot(df_plot, markers='.')
+import os
+import sys
+sys.path.append(os.path.join(os.path.dirname("opencluster"), "."))
+from opencluster.plots import membership_3d_plot
+
+membership_3d_plot(df[['x', 'y', 'z']].values, df['p_field'].values)
+
+plt.show()
+print('coso') """
 
 def one_cluster_sample_small(field_size=int(1e3), cluster_size=int(2e2)):
     field = Field(
@@ -654,6 +693,32 @@ def case2_sample2c(fmix=.6):
     ]
     return Synthetic(field=field, clusters=clusters).rvs()
 
+def case2_sample2c_big(fmix=.6):
+    n = 1000
+    n_clusters = 2
+    cmix = (1-fmix)/n_clusters
+
+    field = Field(
+        pm=BivariateUnifom(locs=(-7, 6), scales=(10.5, 10.5)),
+        space=UniformFrustum(locs=(118, -31, 1.2), scales=(36, 36, 2)),
+        star_count=int(n*fmix),
+        )
+    clusters = [
+        Cluster(
+            space=stats.multivariate_normal(mean=polar_to_cartesian([120.5, -27.25, 1.57]), cov=50),
+            pm=stats.multivariate_normal(mean=(-5.4, 6.75), cov=1./34),
+            star_count=int(n*cmix),
+        ),
+        Cluster(
+            space=stats.multivariate_normal(mean=polar_to_cartesian([121.75, -28.75, 1.63]), cov=50),
+            pm=stats.multivariate_normal(mean=(-6.25, 7.75), cov=1./34),
+            star_count=int(n*cmix),
+        ),
+    ]
+    return Synthetic(field=field, clusters=clusters).rvs()
+
+#df = case2_sample2c_big()
+#print('coso')
 #df = case2_sample1c(fmix=.6)
 #print('coso')
 
